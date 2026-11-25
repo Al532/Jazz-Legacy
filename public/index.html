@@ -33,7 +33,10 @@
             <p class="playing-artist" id="current-artist"></p>
             <p class="playing-sub" id="current-sub"></p>
           </div>
-          <button id="favorite-track" class="favorite-star" type="button" aria-label="Version favorite" aria-pressed="false" disabled><span aria-hidden="true">☆</span></button>
+          <div class="recording-actions">
+            <button id="favorite-track" class="favorite-star" type="button" aria-label="Version favorite" aria-pressed="false" disabled><span aria-hidden="true">☆</span></button>
+            <button id="share-version" type="button" class="share-button" aria-label="Partager la version en cours" title="Partager la version en cours" disabled></button>
+          </div>
         </div>
         <div class="timeline">
           <input id="seek" type="range" min="0" max="100" step="0.1" value="0" aria-label="Position de lecture">
@@ -46,13 +49,10 @@
           <button id="forward-five" type="button" class="btn-outline skip-time" aria-label="Avancer de 5 secondes" disabled>+5 s</button>
         </div>
         <button id="next" class="btn-outline next-track" type="button"><span id="next-label">Enregistrement suivant</span><span aria-hidden="true">→</span></button>
-        <div class="quick-controls">
-          <details id="player-versions" class="player-disclosure" hidden>
-            <summary>Versions du standard</summary>
-            <ul id="version-options" class="standard-choices"></ul>
-          </details>
-          <button id="share-version" type="button" class="share-button" aria-label="Partager la version en cours" title="Partager la version en cours" disabled></button>
-        </div>
+        <details id="player-versions" class="player-disclosure" hidden>
+          <summary>Versions du standard</summary>
+          <ul id="version-options" class="standard-choices"></ul>
+        </details>
         <details class="player-disclosure" id="personnel-details" hidden>
           <summary>Musiciens</summary>
           <ul id="current-personnel" class="personnel"></ul>

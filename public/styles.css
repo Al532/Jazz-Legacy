@@ -47,6 +47,7 @@ body { margin: 0; min-height: 100vh; background: radial-gradient(ellipse at 15% 
 .eyebrow { color: var(--accent); text-transform: uppercase; letter-spacing: .1em; font-size: .75rem; font-weight: 680; display: flex; gap: .6rem; align-items: center; margin-bottom: .8rem; }
 .engine-indicator { margin-left: auto; color: var(--muted); letter-spacing: .04em; text-transform: none; font-weight: 500; }
 .recording { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: clamp(.45rem, 1.25vw, .9rem); }
+.recording-actions { display: flex; align-items: center; }
 .cover-slot { width: clamp(3.5rem, 9vw, 6.75rem); aspect-ratio: 1; border-radius: .4rem; overflow: hidden; }
 .player-cover { display: block; width: 100%; height: 100%; object-fit: cover; background: var(--inset); }
 .playing-title { font: 400 clamp(1.45rem, 3.2vw, 2.5rem)/1.03 var(--serif); letter-spacing: -.035em; margin: 0; overflow-wrap: anywhere; }
@@ -59,11 +60,10 @@ body { margin: 0; min-height: 100vh; background: radial-gradient(ellipse at 15% 
 .timeline { margin-top: 1.35rem; }
 .timeline input { width: 100%; accent-color: var(--accent); margin: 0; }
 .timeline-label { display: flex; justify-content: space-between; color: var(--muted); font-size: .8125rem; font-variant-numeric: tabular-nums; }
-.transport, .quick-controls, .playlist-controls, .account-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.transport, .playlist-controls, .account-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
 .transport { justify-content: center; gap: .6rem; margin: .85rem 0; }
-.quick-controls, .playlist-controls { margin-top: .65rem; }
-.quick-controls { align-items: start; flex-wrap: nowrap; justify-content: space-between; border-top: 1px solid var(--line); padding-top: .4rem; }
-.player-disclosure { min-width: 0; flex: 1; }
+.playlist-controls { margin-top: .65rem; }
+#player-versions { margin-top: .65rem; border-top: 1px solid var(--line); padding-top: .4rem; }
 .player-disclosure summary { min-height: 44px; padding: .65rem .25rem; color: var(--accent); cursor: pointer; }
 .player-disclosure .standard-choices { padding-left: .25rem; }
 .next-track { display: flex; align-items: center; justify-content: center; gap: .6rem; width: 100%; min-height: 44px; color: var(--accent); }
