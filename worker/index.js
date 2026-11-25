@@ -56,6 +56,16 @@ export default {
     try {
       const url=new URL(request.url), path=url.pathname;
       if (env.DEPLOYMENT === 'cloudflare') {
+        if (env.JAZZ_PUBLIC_ORIGIN && url.hostname.endsWith('.workers.dev') && ['GET', 'HEAD'].includes(request.method) &&
+            URL.canParse(env.JAZZ_PUBLIC_ORIGIN)) {
+          const target = new URL(env.JAZZ_PUBLIC_ORIGIN);
+          if (target.protocol === 'https:' && target.origin !== url.origin) {
+            target.pathname = path;
+            target.search = url.search;
+            target.hash = '';
+            return new Response(null, {status: 302, headers: {Location: target.href, 'Cache-Control': 'no-store'}});
+          }
+        }
         if (!env.MEDIA) return json({error: 'Stockage indisponible'}, 503);
         if (path === '/api/session') return await setCloudSession(request, env);
         if (path === '/supabase-config.mjs') return new Response(

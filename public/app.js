@@ -4,7 +4,6 @@ import {setupLibrary} from './library-ui.mjs';
 import {parseLoudness, volumeForTrack} from './loudness.mjs';
 import {setupAccount} from './account.mjs';
 import {offlineAudio} from './offline.mjs';
-import {youtubePlayer} from './youtube.mjs';
 
 const $ = id => document.getElementById(id);
 const STORAGE = 'heads-standards-v1';
@@ -75,38 +74,8 @@ const localAudio = offlineAudio();
 let offlineIds = new Set();
 let objectUrl;
 let autoplayPending = false;
-let skippedVideos = 0;
+let skippedUnavailable = 0;
 let unloadAudio;
-const video = youtubePlayer($('youtube-player'), {
-  change(playing) {
-    if (playing) {
-      autoplayPending = false;
-      skippedVideos = 0;
-      notify('');
-      const item = current();
-      if (item) setupMedia(item);
-    }
-    setPlaying(playing);
-  },
-  blocked() {
-    autoplayPending = true;
-    notify('Appuie sur Lecture pour lancer l’enregistrement.');
-  },
-  ended() { if (video.active()) autoAdvance(); },
-  error() {
-    if (!video.active()) return;
-    video.stop();
-    positionReady = false;
-    autoplayPending = false;
-    setPlaying(false);
-    if (scope.length > 1 && skippedVideos < Math.min(3, scope.length - 1)) {
-      skippedVideos++;
-      next();
-      return;
-    }
-    notify('Cette version est à écouter sur YouTube.');
-  },
-});
 let listeningMode = defaultMode;
 
 function lastMode() { return account.mode() || defaultMode; }
@@ -118,7 +87,7 @@ function listen(versions, label, mode, gesture = true, autoplay = true) {
     if (gesture) notify('Aucun enregistrement disponible dans ce mode.');
     return false;
   }
-  skippedVideos = 0;
+  skippedUnavailable = 0;
   listeningMode = mode;
   if (gesture) account.mode(mode);
   scope = [...new Set(tracks.map(version => version.id))];
@@ -249,7 +218,7 @@ function updatePlayerUi(){
   $('current-personnel').hidden = !item?.musicians?.length;
   $('play').textContent = isPlaying ? '❚❚' : '▶';
   $('play').setAttribute('aria-label', isPlaying ? 'Mettre en pause' : 'Lire');
-  $('engine-indicator').textContent = playingStoredAudio ? 'MP3' : video.active() ? 'YouTube' : objectUrl ? 'Hors ligne' : '';
+  $('engine-indicator').textContent = playingStoredAudio ? 'MP3' : objectUrl ? 'Hors ligne' : '';
   library.setPlaylistTrack(item);
   const max = Math.max(1, duration || 120);
   $('seek').max = String(max);
@@ -284,7 +253,7 @@ async function addTrack(text, sharedTitle = '') {
   } catch { /* la version reste disponible */ }
 }
 
-function pause(){ if (video.active()) video.pause(); else audio.pause(); setPlaying(false); }
+function pause(){ audio.pause(); setPlaying(false); }
 function setPlaying(playing) {
   const started = playing && !isPlaying;
   isPlaying = playing;
@@ -305,7 +274,7 @@ function prev() {
   playItem(id);
 }
 function autoAdvance(){
-  if (advanceGuard || (!positionReady && !video.active())) return;
+  if (advanceGuard || !positionReady) return;
   advanceGuard = true;
   if (scope.length === 1) {
     pause();
@@ -316,7 +285,6 @@ async function playItem(id, skipStored = false, gesture = true) {
   const item = library.lookup(id);
   if (!item) return;
   const seq = ++operation;
-  video.stop();
   unloadAudio?.();
   audio.pause();
   audio.removeAttribute('src');
@@ -372,7 +340,7 @@ async function playItem(id, skipStored = false, gesture = true) {
     await audio.play();
     if (seq !== operation) return;
     autoplayPending = false;
-    skippedVideos = 0;
+    skippedUnavailable = 0;
     setPlaying(true);
     notify('');
     setupMedia(item);
@@ -385,12 +353,9 @@ async function playItem(id, skipStored = false, gesture = true) {
       return;
     }
     if (playingStoredAudio && navigator.onLine) return playItem(item.id, true, gesture);
-    if (item.videoId && navigator.onLine) {
-      playingStoredAudio = false;
-      video.load(item.videoId, true);
-      showYouTubeLink(item);
-      notify(gesture ? '' : 'Appuie sur Lecture si le navigateur bloque le démarrage.');
-      updatePlayerUi();
+    if (scope.length > 1 && skippedUnavailable < Math.min(3, scope.length - 1)) {
+      skippedUnavailable++;
+      next();
       return;
     }
     autoplayPending = false;
@@ -442,7 +407,6 @@ function togglePlay() {
   if (!current()) { restoreMode(lastMode(), true); return; }
   if (isPlaying) { pause(); return; }
   advanceGuard = false;
-  if (video.active()) { video.play(); return; }
   if (positionReady) {
     audio.play().then(() => {setPlaying(true);notify('');}).catch(() => playItem(currentId));
   } else playItem(currentId);
@@ -451,8 +415,7 @@ function togglePlay() {
 function seekTo(value) {
   const seconds = Number(value);
   if (!positionReady || !Number.isFinite(seconds)) return;
-  if (video.active()) video.seek(seconds);
-  else if (audio.readyState) audio.currentTime = seconds;
+  if (audio.readyState) audio.currentTime = seconds;
   currentTime = seconds;
   updatePlayerUi();
 }
@@ -465,17 +428,9 @@ function setupMedia(item){if(!('mediaSession' in navigator))return;
 audio.addEventListener('ended',autoAdvance);
 audio.addEventListener('pause',()=>setPlaying(false));
 audio.addEventListener('play',()=>setPlaying(true));
-audio.addEventListener('error',()=>{if (positionReady && !video.active()) playItem(currentId, true);});
+audio.addEventListener('error',()=>{if (positionReady) playItem(currentId, true);});
 setInterval(()=>{
-  if(positionReady && !video.active() && audio.readyState>0){currentTime=audio.currentTime;duration=Number.isFinite(audio.duration)?audio.duration:duration;}
-  if (video.active()) {
-    const time = video.time();
-    if (time?.duration && !positionReady) {
-      positionReady = true;
-      updatePlayerUi();
-    }
-    if (time) ({currentTime, duration} = time);
-  }
+  if(positionReady && audio.readyState>0){currentTime=audio.currentTime;duration=Number.isFinite(audio.duration)?audio.duration:duration;}
   $('time-current').textContent = clock(currentTime);
   $('time-end').textContent = clock(duration);
   $('seek').max = String(Math.max(1, duration || 120));
@@ -549,7 +504,7 @@ window.addEventListener('jazz-session-changed', () => {
 window.addEventListener('offline', updatePlayerUi);
 document.addEventListener('visibilitychange', () => {if (!document.hidden) syncNow();});
 document.addEventListener('click', event => {
-  if (!autoplayPending || isPlaying || !(video.active() || positionReady)) return;
+  if (!autoplayPending || isPlaying || !positionReady) return;
   if (event.target.closest('#play, #prev, #next, #favorite-track, #other-version, #listen-all, #listen-favorites, #playlist-listen, #share-version, .standard-choice, .standard-share, .version-share, a, dialog')) return;
   autoplayPending = false;
   togglePlay();

@@ -64,8 +64,6 @@ a { color: var(--accent); text-underline-offset: .18em; }
 .transport-small { font-size: 1.3rem; }
 .transport-play { display: grid; place-items: center; border: 0; border-radius: 50%; width: 3.35rem; height: 3.35rem; color: #241b16; background: var(--accent); font-size: 1.3rem; }
 .skip-time { white-space: nowrap; }
-.video-player { margin-top: .9rem; background: #000; border-radius: .55rem; overflow: hidden; aspect-ratio: 16 / 9; min-height: 200px; }
-.video-player iframe { display: block; width: 100%; height: 100%; border: 0; }
 .player-note { font-size: .875rem; margin-top: .75rem; }
 .player-note:empty, #account-status:empty { display: none; }
 #youtube-fallback { display: inline-block; margin-top: .55rem; font-size: .875rem; }

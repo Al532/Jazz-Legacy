@@ -1,9 +1,9 @@
-const CACHE = 'jazz-legacy-shell-v25';
+const CACHE = 'jazz-legacy-shell-v26';
 const CATALOGUE = '/catalogue-data.json';
 const FILES = [
   '/', '/styles.css', '/app.js', '/lib.mjs', '/listening.mjs', '/loudness.mjs',
   '/library-ui.mjs', '/account.mjs', '/sync.mjs', '/supabase.js', '/supabase-config.mjs',
-  '/youtube.mjs', '/offline.mjs', '/manifest.webmanifest',
+  '/offline.mjs', '/manifest.webmanifest',
   '/icon.png', '/icon-192.png',
 ];
 

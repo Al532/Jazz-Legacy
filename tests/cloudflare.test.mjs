@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker from '../dist/server/index.js';
+import pages from '../pages/public/_worker.js';
 
 const id = 'TestVideo01';
 const key = 'jazz-legacy/media/' + 'c'.repeat(64) + '.mp3';
@@ -52,4 +53,21 @@ test('online refresh reads the active release and anyone can stream its publishe
   assert.deepEqual(await (await get('/api/loudness')).json(), {state: 'signIn'});
   assert.equal((await get('/api/audio/status', {Cookie: '__Host-jazz-session=other-token'})).status, 403);
   assert.equal((await get('/api/audio/status', {Cookie: '__Host-jazz-session=owner-token'})).status, 200);
+});
+
+test('Pages relays the original request and Workers redirects old links to the neutral address', async () => {
+  const neutralOrigin = 'https://jazz-legacy.pages.dev';
+  const env = {DEPLOYMENT: 'cloudflare', MEDIA: {}, JAZZ_PUBLIC_ORIGIN: neutralOrigin};
+  const query = '/?version=standard%3ATestVideo01';
+  const old = await worker.fetch(new Request('https://jazz-legacy.example.workers.dev' + query), env);
+  assert.equal(old.status, 302);
+  assert.equal(old.headers.get('Location'), neutralOrigin + query);
+  const request = new Request(neutralOrigin + '/api/audio/' + id, {headers: {Range: 'bytes=1-2'}});
+  const result = await pages.fetch(request, {JAZZ_LEGACY: {fetch(incoming) {
+    assert.equal(incoming, request);
+    return new Response('audio', {status: 206});
+  }}});
+  assert.equal(result.status, 206);
+  assert.equal(await result.text(), 'audio');
+  assert.equal((await worker.fetch(new Request(neutralOrigin + query), env)).status, 200);
 });

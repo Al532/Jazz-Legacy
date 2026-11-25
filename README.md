@@ -6,7 +6,9 @@ Le code de production est publié depuis `main` sur Cloudflare Workers. Le catal
 
 Les commandes de vérification sont `npm ci` puis `npm run check`. `npm run dev -- --port 3000` ouvre le lecteur avec un catalogue fictif. Un push sur `main` lance Workers Builds, avec `npm run check` comme commande de build et `npx wrangler deploy --keep-vars` comme commande de déploiement. La configuration Wrangler utilise le bucket existant `heads-audio`. Un `git revert` sur `main` permet de remettre en ligne le code précédent.
 
-Les MP3 de l’édition active sont accessibles à tous depuis le lecteur. Configurer `SUPABASE_URL` et `SUPABASE_PUBLISHABLE_KEY` dans les variables du Worker pour les comptes facultatifs et les paroles personnelles. `JAZZ_OWNER_ID` désigne l’UUID du compte autorisé à consulter les diagnostics et les mesures de volume. Ajouter l’adresse du site dans les URL de retour autorisées de Supabase. La connexion Google et l’envoi des liens par e-mail sont configurés dans Supabase.
+Les MP3 de l’édition active sont accessibles à tous depuis le lecteur audio. Lorsqu’une version est disponible uniquement sur YouTube, le lecteur peut afficher un lien vers la page de la vidéo. Configurer `SUPABASE_URL` et `SUPABASE_PUBLISHABLE_KEY` dans les variables du Worker pour les comptes facultatifs et les paroles personnelles. `JAZZ_OWNER_ID` désigne l’UUID du compte autorisé à consulter les diagnostics et les mesures de volume. Ajouter l’adresse du site dans les URL de retour autorisées de Supabase. La connexion Google et l’envoi des liens par e-mail sont configurés dans Supabase.
+
+Pour utiliser l’adresse neutre, créer le projet Cloudflare Pages `jazz-legacy` depuis le même dépôt et la branche `main`, avec `pages` comme racine, `public` comme dossier de sortie et une commande de build vide. La configuration dans `pages/` relie directement Pages au Worker `jazz-legacy`. Après validation de la nouvelle adresse et de la connexion Supabase sur cette adresse, définir `JAZZ_PUBLIC_ORIGIN` dans les variables de production du Worker avec l’origine Pages pour rediriger les anciens liens `workers.dev`.
 
 ## Catalogue Windows
 
