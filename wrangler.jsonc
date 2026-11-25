@@ -1,0 +1,10 @@
+{
+  "$schema": "https://developers.cloudflare.com/workers/wrangler/configuration/",
+  "name": "jazz-legacy",
+  "main": "dist/server/index.js",
+  "compatibility_date": "2026-11-25",
+  "workers_dev": true,
+  "preview_urls": false,
+  "vars": {"DEPLOYMENT": "cloudflare"},
+  "r2_buckets": [{"binding": "MEDIA", "bucket_name": "heads-audio"}]
+}

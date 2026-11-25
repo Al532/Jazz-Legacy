@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#181717"><meta name="description" content="Iconic recordings of jazz standards">
+  <link rel="manifest" href="/manifest.webmanifest"><link rel="icon" type="image/png" href="/icon.png">
+  <link rel="stylesheet" href="/styles.css"><title>Jazz Legacy</title>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand"><img class="logomark" src="/icon.png" alt="" width="54" height="54"><div><h1>Jazz Legacy</h1><p lang="en">Iconic recordings of jazz standards</p></div></div>
+    <div class="top-actions"><button class="btn-outline" id="account-button" type="button">Mon compte</button></div>
+  </header>
+  <main class="main-grid">
+    <section class="panel now-panel" aria-label="Lecteur">
+      <img id="player-cover" class="player-cover" alt="" aria-hidden="true" hidden>
+      <div class="eyebrow"><span class="eyebrow-line"></span> En écoute <span class="engine-indicator" id="engine-indicator"></span></div>
+      <div class="playing-title"><span id="current-title">Aucun standard sélectionné</span><button id="favorite-track" class="favorite-star" type="button" aria-label="Favori" aria-pressed="false" disabled><span aria-hidden="true">☆</span></button></div>
+      <div class="playing-sub" id="current-sub">Choisis un standard dans le catalogue.</div>
+      <ul id="current-personnel" class="personnel" aria-label="Musiciens" hidden></ul>
+      <div class="timeline">
+        <input id="seek" type="range" min="0" max="100" step="0.1" value="0" aria-label="Position de lecture">
+        <div class="timeline-label"><span id="time-current">0:00</span><span id="time-end">0:00</span></div>
+      </div>
+      <div class="transport">
+        <button id="prev" class="transport-small" aria-label="Enregistrement précédent">⏮</button>
+        <button id="back-five" type="button" class="btn-outline skip-time" aria-label="Reculer de 5 secondes" disabled>−5 s</button>
+        <button id="play" class="transport-play" aria-label="Lire">▶</button>
+        <button id="forward-five" type="button" class="btn-outline skip-time" aria-label="Avancer de 5 secondes" disabled>+5 s</button>
+        <button id="next" class="transport-small" aria-label="Enregistrement suivant">⏭</button>
+      </div>
+      <div class="quick-controls">
+        <button id="other-version" type="button" class="btn-outline" disabled>Écouter une autre version de ce standard</button>
+        <button id="share-version" type="button" class="share-button" aria-label="Partager la version en cours" title="Partager la version en cours" disabled></button>
+      </div>
+      <div class="listening-controls">
+        <button id="listen-all" class="btn-outline" aria-pressed="true" type="button" disabled>Écouter des standards au hasard</button>
+        <button id="listen-favorites" class="btn-outline" aria-pressed="false" type="button" disabled>Écouter les favoris</button>
+      </div>
+      <div id="youtube-player" class="video-player" hidden></div>
+      <div class="player-note" id="player-status" role="status" aria-live="polite"></div>
+      <a id="youtube-fallback" hidden target="_blank" rel="noopener noreferrer">Ouvrir sur YouTube</a>
+    </section>
+    <section class="panel collection-panel" aria-label="Bibliothèque">
+      <div class="collection-head"><h2>Standards <span id="count">0</span></h2></div>
+      <div class="catalogue-controls">
+        <input type="search" id="search" placeholder="Rechercher un standard…" aria-label="Rechercher">
+      </div>
+      <div class="items" id="items"><p class="empty">Chargement des standards…</p></div>
+    </section>
+    <section class="panel playlists-panel" aria-labelledby="playlists-heading">
+      <h2 id="playlists-heading">Playlists</h2>
+      <div class="playlist-controls">
+        <label for="playlist-select">Playlist</label><select id="playlist-select"></select>
+      </div>
+      <div class="playlist-controls">
+        <button id="playlist-listen" class="btn-primary" aria-pressed="false" type="button">Écouter</button>
+        <button id="playlist-new" class="btn-outline" type="button">Créer</button>
+        <button id="playlist-rename" class="btn-outline" type="button">Renommer</button>
+        <button id="playlist-delete" class="btn-outline" type="button">Supprimer</button>
+      </div>
+      <div id="playlist-membership" class="playlist-controls" hidden>
+        <button id="playlist-track" class="btn-outline" type="button"></button>
+        <button id="playlist-standard" class="btn-outline" type="button"></button>
+      </div>
+    </section>
+  </main>
+</div>
+<dialog id="account-dialog" class="dialog" aria-labelledby="account-heading">
+  <div class="dialog-top">
+    <h2 id="account-heading">Mon compte</h2>
+    <form method="dialog"><button class="close" aria-label="Fermer">×</button></form>
+  </div>
+  <div id="account-guest">
+    <p>Le compte est facultatif. Connecte-toi pour retrouver tes favoris, playlists et préférences sur tes autres appareils.</p>
+    <button id="account-google" type="button" class="btn-outline">Continuer avec Google</button>
+    <form id="account-email-form">
+      <label for="account-email">Adresse e-mail</label>
+      <input id="account-email" type="email" autocomplete="email" maxlength="254" required>
+      <button class="btn-primary" type="submit">Recevoir un lien de connexion</button>
+    </form>
+  </div>
+  <div id="account-connected" hidden>
+    <p id="account-identity"></p>
+    <div class="account-actions">
+      <button id="account-sign-out" class="btn-outline" type="button">Se déconnecter</button>
+      <button id="account-delete" class="text-button" type="button">Supprimer mon compte</button>
+    </div>
+  </div>
+  <p id="account-status" role="status" aria-live="polite"></p>
+  <label for="account-import">Importer une sauvegarde de Jazz Legacy</label>
+  <input id="account-import" type="file" accept="application/json,.json">
+</dialog>
+<dialog id="share-dialog" class="dialog" aria-labelledby="share-heading">
+  <div class="dialog-top">
+    <h2 id="share-heading">Partager le lien d’écoute</h2>
+    <form method="dialog"><button class="close" aria-label="Fermer">×</button></form>
+  </div>
+  <label for="share-url">Lien à copier</label>
+  <input id="share-url" type="url" readonly autofocus>
+</dialog>
+<div id="share-status" class="share-status" role="status"></div>
+<audio id="audio" preload="metadata"></audio>
+<script defer src="/supabase.js"></script>
+<script type="module" src="/app.js"></script>
+</body></html>
