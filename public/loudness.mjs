@@ -31,12 +31,13 @@ function correction(record) {
 
 export function parseLoudness(data) {
   if (!data || typeof data !== 'object') throw new Error('Format JSON non reconnu.');
-  const source = data.tracks ?? data.files ?? data.entries ?? data;
+  const analysed = data.schemaVersion === 1 && Object.hasOwn(data, 'recordings');
+  const source = analysed ? data.recordings : (data.tracks ?? data.files ?? data.entries ?? data);
   if (!source || typeof source !== 'object') throw new Error('Liste des enregistrements introuvable.');
   const entries = Array.isArray(source) ? source.map(record => ['', record]) : Object.entries(source);
   const records = [];
   for (const [key, record] of entries) {
-    const db = correction(record);
+    const db = analysed ? numeric(record?.track?.gainDB) : correction(record);
     if (!Number.isFinite(db)) continue;
     const keys = [...new Set([key, record?.id, record?.videoId, record?.youtube, record?.youtubeId, record?.youtube_id,
       record?.filename, record?.file, record?.path, record?.audioUrl].flatMap(recordingKeys))];

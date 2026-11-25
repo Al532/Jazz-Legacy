@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker from '../dist/server/index.js';
 import pages from '../pages/public/_worker.js';
+import {parseLoudness, volumeForTrack} from '../public/loudness.mjs';
 
 const id = 'TestVideo01';
 const key = 'jazz-legacy/media/' + 'c'.repeat(64) + '.mp3';
@@ -53,6 +54,31 @@ test('online refresh reads the active release and anyone can stream its publishe
   assert.deepEqual(await (await get('/api/loudness')).json(), {state: 'signIn'});
   assert.equal((await get('/api/audio/status', {Cookie: '__Host-jazz-session=other-token'})).status, 403);
   assert.equal((await get('/api/audio/status', {Cookie: '__Host-jazz-session=owner-token'})).status, 200);
+});
+
+test('visitors can level published audio without signing in', async () => {
+  const MEDIA = {get: async name => ({json: async () => name.endsWith('current.json') ? {release: first} : {
+    audio: {[id]: key, r2TMOu68psA: key},
+    loudness: {
+      schemaVersion: 1,
+      recordings: {
+        ['standard:' + id]: {youtubeId: id, track: {gainDB: -7, integratedLUFS: -9}, head: {gainDB: 0}},
+        'allofme:r2TMOu68psA': {youtubeId: 'r2TMOu68psA', track: {gainDB: 3}},
+        'unpublished:OtherTest01': {youtubeId: 'OtherTest01', track: {gainDB: 12}},
+      },
+    },
+  }})};
+  const get = path => worker.fetch(new Request('https://jazz.test' + path), {DEPLOYMENT: 'cloudflare', MEDIA});
+  const playback = await (await get('/api/loudness?playback=1')).json();
+  assert.deepEqual(playback, {state: 'available', data: {tracks: [
+    {id: 'standard:' + id, youtubeId: id, gainDb: -7},
+    {id: 'allofme:r2TMOu68psA', youtubeId: 'r2TMOu68psA', gainDb: 3},
+  ]}});
+  const records = parseLoudness(playback.data);
+  assert.equal(volumeForTrack({videoId: 'r2TMOu68psA'}, records), 1);
+  assert.ok(Math.abs(volumeForTrack({videoId: id}, records) - 10 ** (-10 / 20)) < 1e-9);
+  assert.deepEqual(await (await get('/api/loudness')).json(), {state: 'signIn'});
+  assert.deepEqual(await (await get('/api/loudness/status?playback=1')).json(), {state: 'signIn'});
 });
 
 test('Pages relays the original request and Workers redirects old links to the neutral address', async () => {

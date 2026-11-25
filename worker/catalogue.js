@@ -51,7 +51,8 @@ async function cloudMedia(request, env, path) {
   const isCover = path.startsWith('/api/cover/');
   const isLoudness = path === '/api/loudness' || path === '/api/loudness/status';
   if (!['GET', 'HEAD'].includes(request.method)) return json({}, 405);
-  if (isLoudness || path === '/api/audio/status') {
+  const isPlaybackLoudness = path === '/api/loudness' && new URL(request.url).searchParams.get('playback') === '1';
+  if ((isLoudness && !isPlaybackLoudness) || path === '/api/audio/status') {
     const user = await cloudUser(request, env);
     if (!user?.id || user.id !== env.JAZZ_OWNER_ID) {
       if (isLoudness) return json({state: user ? 'accessDenied' : 'signIn'});
@@ -65,6 +66,15 @@ async function cloudMedia(request, env, path) {
   });
   if (path === '/api/audio') return json({enabled: true, ids: Object.keys(data.audio)});
   if (path === '/api/audio/status') return json({enabled: true, connected: true});
+  if (isPlaybackLoudness) {
+    const tracks = Object.entries(data.loudness?.recordings ?? {}).flatMap(([id, recording]) => {
+      const youtubeId = recording?.youtubeId;
+      const gainDb = recording?.track?.gainDB;
+      return audioId.test(youtubeId) && Object.hasOwn(data.audio, youtubeId) && Number.isFinite(gainDb)
+        ? [{id, youtubeId, gainDb}] : [];
+    });
+    return json(tracks.length ? {state: 'available', data: {tracks}} : {state: 'missing'});
+  }
   if (path === '/api/loudness/status') return json({state: data.loudness ? 'available' : 'missing'});
   if (path === '/api/loudness') return json(data.loudness ? {state: 'available', data: data.loudness} : {state: 'missing'});
   const id = path.slice((isCover ? '/api/cover/' : '/api/audio/').length);

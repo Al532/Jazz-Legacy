@@ -50,7 +50,7 @@ function loadSharedLoudness() {
   loudnessExpires = Date.now() + 60000;
   loudnessLoad = (async () => {
     try {
-      const response = await fetch('/api/loudness', {cache: 'no-store'});
+      const response = await fetch('/api/loudness?playback=1', {cache: 'no-store'});
       if (!response.ok) throw new Error();
       const {state, data} = await response.json();
       if (state === 'available') {

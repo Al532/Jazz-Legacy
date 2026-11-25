@@ -57,3 +57,19 @@ test('an absent or invalid shared file gives a neutral playback fallback', async
     assert.deepEqual(await response.json(), {state});
   }
 });
+
+test('the player levels complete recordings using the Windows analyser output', () => {
+  const records = parseLoudness({
+    schemaVersion: 1,
+    targetLUFS: -16,
+    ceilingDBTP: -1,
+    recordings: {
+      'allofme:r2T-MOu68ps': {youtubeId: 'r2T-MOu68ps', track: {gainDB: 3}, head: {gainDB: -6}},
+      'bodyandsoul:QI3wWiquZGc': {youtubeId: 'QI3wWiquZGc', track: {gainDB: -7}},
+    },
+  });
+  assert.equal(records.length, 2);
+  assert.equal(volumeForTrack({videoId: 'r2T-MOu68ps'}, records), 1);
+  assert.ok(Math.abs(volumeForTrack({id: 'bodyandsoul:QI3wWiquZGc'}, records) - 10 ** (-10 / 20)) < 1e-9);
+  assert.equal(volumeForTrack({videoId: 'unmeasured0'}, records), 1);
+});

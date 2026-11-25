@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import uuid
 
@@ -200,8 +201,22 @@ def activation(initial, pointer):
 
 def publish(root, catalogue):
     audio, covers = inventories(root, catalogue)
-    print(f'{len(catalogue["standards"])} standards, {len(audio)} MP3 et {len(covers)} jaquettes ou miniatures.')
-    loudness = read(root / 'audio/loudness.json', {})
+    catalogue_path = root / 'catalogue-local/catalogue-data.json'
+    audio_dir = root / 'audio'
+    expected = {f'{row["id"]}:{version["youtube"]}'
+                for row in catalogue['standards'] for version in row['versions']
+                if version.get('youtube') in audio}
+    print(f'Catalogue vérifié : {len(catalogue["standards"])} standards, {len(audio)} MP3 et '
+          f'{len(covers)} jaquettes ou miniatures.', flush=True)
+    print('Actualisation de l’index audio et des mesures de volume…', flush=True)
+    subprocess.run(['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+                    str(root / 'scripts/telecharger_audio.ps1'), '-ListOnly',
+                    '-CataloguePath', str(catalogue_path), '-OutputDirectory', str(audio_dir)], check=True)
+    subprocess.run([sys.executable, '-B', '-X', 'utf8', str(root / 'scripts/analyse_loudness.py'),
+                    '--directory', str(audio_dir)], check=True)
+    loudness = read(audio_dir / 'loudness.json')
+    if set(loudness['recordings']) != expected:
+        raise ValueError('Les mesures de volume ne correspondent pas aux MP3 sélectionnés.')
     items = read(root / 'catalogue-local/ajouts-partages.json', [])
     initial = rclone('cat', remote(PREFIX + 'current.json'), allow_missing=True)
     previous = json.loads(initial)['release'] if initial else None
@@ -221,6 +236,7 @@ def publish(root, catalogue):
             old = json.loads(rclone('cat', remote(PREFIX + 'releases/' + previous + '.json')))
             old_standards = {row['id']: row for row in old['catalogue']['standards']}
         else:
+            old = {}
             old_standards = {}
         changed = [row['title'] for row in catalogue['standards'] if old_standards.pop(row['id'], None) != row]
         for title in changed[:20]:
@@ -228,6 +244,8 @@ def publish(root, catalogue):
         if old_standards:
             print('Standards retirés : ' + ', '.join(row['title'] for row in old_standards.values()))
         print(f'{len(changed)} fiches nouvelles ou modifiées, {len(list(stage.iterdir()))} médias à transférer.')
+        if old.get('loudness') != loudness:
+            print(f'Mesures de volume actualisées pour {len(expected)} enregistrements.')
         if input('Activer cette édition en ligne ? [o/N] ').strip().casefold() != 'o':
             return
         if any(stage.iterdir()):
@@ -245,7 +263,8 @@ def publish(root, catalogue):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['preparer', 'verifier', 'publier', 'retablir'])
+    parser.add_argument('action', nargs='?', default='publier',
+                        choices=['preparer', 'verifier', 'publier', 'retablir'])
     parser.add_argument('--dossier', type=Path, default=ROOT)
     args = parser.parse_args()
     root = args.dossier.resolve()
