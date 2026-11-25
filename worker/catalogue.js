@@ -36,15 +36,27 @@ async function setCloudSession(request, env) {
   return new Response(null, {status: token && !user ? 401 : 204, headers: {'Set-Cookie': cookie, 'Cache-Control': 'no-store'}});
 }
 
-async function cloudMedia(request, env, path, user) {
+async function cloudStoredAudioStream(env, id) {
+  try {
+    const release = await activeCatalogue(env.MEDIA);
+    if (!release) return {storedAudio: 'storageUnavailable'};
+    return Object.hasOwn(release.audio, id) ? {url: '/api/audio/' + id} : {storedAudio: 'notUploaded'};
+  } catch {
+    return {storedAudio: 'storageUnavailable'};
+  }
+}
+
+async function cloudMedia(request, env, path) {
   const isCatalogue = path === '/catalogue-data.json';
   const isCover = path.startsWith('/api/cover/');
-  const owner = Boolean(user?.id && user.id === env.JAZZ_OWNER_ID);
+  const isLoudness = path === '/api/loudness' || path === '/api/loudness/status';
   if (!['GET', 'HEAD'].includes(request.method)) return json({}, 405);
-  if (!isCatalogue && !isCover && !owner) {
-    if (path === '/api/audio') return json({enabled: false, ids: []});
-    if (path.startsWith('/api/loudness')) return json({state: user ? 'accessDenied' : 'signIn'});
-    return json({error: 'Accès réservé au propriétaire.'}, user ? 403 : 401);
+  if (isLoudness || path === '/api/audio/status') {
+    const user = await cloudUser(request, env);
+    if (!user?.id || user.id !== env.JAZZ_OWNER_ID) {
+      if (isLoudness) return json({state: user ? 'accessDenied' : 'signIn'});
+      return json({error: 'Accès réservé au propriétaire.'}, user ? 403 : 401);
+    }
   }
   const data = await activeCatalogue(env.MEDIA);
   if (!data) return json({error: 'Catalogue non publié.'}, 503);
@@ -55,7 +67,7 @@ async function cloudMedia(request, env, path, user) {
   if (path === '/api/audio/status') return json({enabled: true, connected: true});
   if (path === '/api/loudness/status') return json({state: data.loudness ? 'available' : 'missing'});
   if (path === '/api/loudness') return json(data.loudness ? {state: 'available', data: data.loudness} : {state: 'missing'});
-  const id = path.split('/').at(-1);
+  const id = path.slice((isCover ? '/api/cover/' : '/api/audio/').length);
   if (!audioId.test(id)) return json({}, 404);
   const key = (isCover ? data.covers : data.audio)[id];
   const legacyKey = isCover ? /^jaquettes\/(images|miniatures-youtube)\/[\w.-]+\.(avif|jpe?g|png|webp)$/i : /^[^/\\]+\[[\w-]{11}\]\.mp3$/i;

@@ -7,7 +7,7 @@ const key = 'jazz-legacy/media/' + 'c'.repeat(64) + '.mp3';
 const first = 'a'.repeat(64);
 const second = 'b'.repeat(64);
 
-test('online refresh reads the active release; only the validated owner can stream media', async t => {
+test('online refresh reads the active release and anyone can stream its published MP3s', async t => {
   let active = first;
   const bytes = Uint8Array.from([1, 2, 3, 4]);
   const MEDIA = {
@@ -24,7 +24,7 @@ test('online refresh reads the active release; only the validated owner can stre
   };
   const env = {DEPLOYMENT: 'cloudflare', MEDIA, JAZZ_OWNER_ID: 'owner',
     SUPABASE_URL: 'https://supabase.example', SUPABASE_PUBLISHABLE_KEY: 'stub'};
-  t.mock.method(globalThis, 'fetch', async (_url, {headers}) => Response.json({
+  const auth = t.mock.method(globalThis, 'fetch', async (_url, {headers}) => Response.json({
     id: headers.Authorization.endsWith('owner-token') ? 'owner' : 'other', email_confirmed_at: 'today',
   }));
   const get = (path, headers) => worker.fetch(new Request('https://jazz.test' + path, {headers}), env);
@@ -34,10 +34,22 @@ test('online refresh reads the active release; only the validated owner can stre
   active = second;
   assert.deepEqual(await (await get('/catalogue-data.json')).json(), {standards: [{id: second}]});
   assert.equal((await get('/api/cover/' + id)).status, 404);
-  assert.equal((await get('/api/audio/' + id, {'oai-authenticated-user-id': 'owner'})).status, 401);
-  assert.equal((await get('/api/audio/' + id, {Cookie: '__Host-jazz-session=other-token'})).status, 403);
-  const media = await get('/api/audio/' + id, {Cookie: '__Host-jazz-session=owner-token', Range: 'bytes=1-2'});
+  assert.deepEqual(await (await get('/api/audio')).json(), {enabled: true, ids: [id]});
+  const stream = await (await get('/api/stream/' + id)).json();
+  assert.equal(stream.url, '/api/audio/' + id);
+  assert.equal((await (await get('/api/stream/' + id + '?external=1')).json()).available, false);
+  assert.equal((await get('/api/audio/OtherTest01')).status, 404);
+  const media = await get('/api/audio/' + id, {Range: 'bytes=1-2'});
   assert.equal(media.status, 206);
   assert.equal(media.headers.get('Content-Range'), 'bytes 1-2/4');
   assert.deepEqual([...new Uint8Array(await media.arrayBuffer())], [2, 3]);
+  const head = await worker.fetch(new Request('https://jazz.test/api/audio/' + id, {method: 'HEAD'}), env);
+  assert.equal(head.status, 200);
+  assert.equal(head.headers.get('Content-Length'), '4');
+  assert.equal(head.body, null);
+  assert.equal(auth.mock.callCount(), 0);
+  assert.equal((await get('/api/audio/status')).status, 401);
+  assert.deepEqual(await (await get('/api/loudness')).json(), {state: 'signIn'});
+  assert.equal((await get('/api/audio/status', {Cookie: '__Host-jazz-session=other-token'})).status, 403);
+  assert.equal((await get('/api/audio/status', {Cookie: '__Host-jazz-session=owner-token'})).status, 200);
 });

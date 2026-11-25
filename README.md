@@ -6,7 +6,7 @@ Le code de production est publié depuis `main` sur Cloudflare Workers. Le catal
 
 Les commandes de vérification sont `npm ci` puis `npm run check`. `npm run dev -- --port 3000` ouvre le lecteur avec un catalogue fictif. Un push sur `main` lance Workers Builds, avec `npm run check` comme commande de build et `npx wrangler deploy --keep-vars` comme commande de déploiement. La configuration Wrangler utilise le bucket existant `heads-audio`. Un `git revert` sur `main` permet de remettre en ligne le code précédent.
 
-Configurer `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` et `JAZZ_OWNER_ID` dans les variables du Worker. Utiliser la clé publique Supabase et l'UUID du compte propriétaire dans Authentication → Users. Ajouter l’origine `workers.dev` dans les URL de retour autorisées de Supabase, puis la définir comme URL du site après vérification. La connexion Google et l’envoi des liens par e-mail restent configurés dans Supabase. Le Worker vérifie la session Supabase avant de servir un MP3 privé ou des paroles personnelles.
+Les MP3 de l’édition active sont accessibles à tous depuis le lecteur. Configurer `SUPABASE_URL` et `SUPABASE_PUBLISHABLE_KEY` dans les variables du Worker pour les comptes facultatifs et les paroles personnelles. `JAZZ_OWNER_ID` désigne l’UUID du compte autorisé à consulter les diagnostics et les mesures de volume. Ajouter l’adresse du site dans les URL de retour autorisées de Supabase. La connexion Google et l’envoi des liens par e-mail sont configurés dans Supabase.
 
 ## Catalogue Windows
 

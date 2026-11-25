@@ -63,9 +63,9 @@ export default {
           'export const supabasePublishableKey = ' + JSON.stringify(env.SUPABASE_PUBLISHABLE_KEY || '') + ';',
           {headers: {'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store'}},
         );
-        if (path === '/catalogue-data.json' || path.startsWith('/api/cover/')) return await cloudMedia(request, env, path);
-        if (path === '/api/audio' || path.startsWith('/api/audio/') || path.startsWith('/api/loudness')) {
-          return await cloudMedia(request, env, path, await cloudUser(request, env));
+        if (path === '/catalogue-data.json' || path.startsWith('/api/cover/') || path === '/api/audio' ||
+            path.startsWith('/api/audio/') || path === '/api/loudness' || path === '/api/loudness/status') {
+          return await cloudMedia(request, env, path);
         }
         if (path === '/api/data') {
           if (request.method !== 'GET') return json({}, 405);
@@ -116,7 +116,8 @@ export default {
       }
       const stream=path.match(/^\/api\/stream\/([\w-]{11})$/);
       if(stream && request.method==='GET'){
-        const storedStream = url.searchParams.has('external') ? {} : await storedAudioStream(env, stream[1]);
+        const lookupStored = env.DEPLOYMENT === 'cloudflare' ? cloudStoredAudioStream : storedAudioStream;
+        const storedStream = url.searchParams.has('external') ? {} : await lookupStored(env, stream[1]);
         if (storedStream.url) return json({available: true, url: storedStream.url, mimeType: 'audio/mpeg', storedAudio: 'available'});
         const fallbackUrl = 'https://www.youtube.com/watch?v=' + stream[1];
         const api = env.PIPED_API_URL?.trim().replace(/\/+$/, '');
