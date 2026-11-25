@@ -49,6 +49,7 @@ export function setupLibrary({items, publicItems, listen, shareLink, notify, onC
   let playlistTrack;
   let openGroupId;
   let playingGroupId;
+  let view = 'standards';
   const selected = () => playlists.find(playlist => playlist.id === playlistId);
   const all = () => groups.flatMap(playable);
   const isFavoriteTrack = track => track && (trackFavorites.has(track.id) || trackFavorites.has(track.legacyId));
@@ -137,12 +138,16 @@ export function setupLibrary({items, publicItems, listen, shareLink, notify, onC
 
   function render() {
     const query = normalize(search.value.trim());
-    const scrollTop = list.scrollTop;
-    const candidates = groups.filter(group => !query || normalize([
+    const showingFavorites = view === 'favorites';
+    const visibleGroups = showingFavorites ? groups.flatMap(group => {
+      const recordings = playable(group).filter(isFavoriteTrack);
+      return recordings.length ? [{...group, recordings}] : [];
+    }) : groups;
+    const candidates = visibleGroups.filter(group => !query || normalize([
       group.title, group.composer, ...(group.aliases || []),
       ...group.recordings.flatMap(version => [version.artist, version.album]),
     ].join(' ')).includes(query));
-    get('count').textContent = String(groups.length);
+    get('count').textContent = String(candidates.length);
     get('listen-all').disabled = !all().length;
     get('listen-favorites').disabled = !favorites().length;
     renderPlaylists();
@@ -170,7 +175,7 @@ export function setupLibrary({items, publicItems, listen, shareLink, notify, onC
         }));
       }
       summary.append(heading);
-      if (!query && playingGroupId === group.id) summary.setAttribute('aria-current', 'true');
+      if (playingGroupId === group.id) summary.setAttribute('aria-current', 'true');
       details.append(summary);
       const versions = playable(group);
       if (versions.length) {
@@ -194,24 +199,15 @@ export function setupLibrary({items, publicItems, listen, shareLink, notify, onC
       row.append(details);
       rows.append(row);
     }
-    list.replaceChildren(candidates.length ? rows : element('p', 'Aucun standard trouvé.', 'empty'));
-    list.scrollTop = scrollTop;
+    const emptyMessage = showingFavorites && !visibleGroups.length ? 'Aucun enregistrement favori.' : 'Aucun standard trouvé.';
+    list.replaceChildren(candidates.length ? rows : element('p', emptyMessage, 'empty'));
   }
 
-  function revealPlayingStandard(standardId) {
+  function markPlayingStandard(standardId) {
+    if (playingGroupId === standardId) return;
     playingGroupId = standardId;
-    if (!standardId || search.value.trim()) return;
-    const details = list.querySelector(`[data-standard-id="${CSS.escape(standardId)}"]`);
-    if (!details) return;
     list.querySelector('summary[aria-current]')?.removeAttribute('aria-current');
-    details.firstElementChild.setAttribute('aria-current', 'true');
-    openGroupId = standardId;
-    details.open = true;
-    const row = details.getBoundingClientRect();
-    const viewport = list.getBoundingClientRect();
-    if (row.top < viewport.top || row.bottom > viewport.bottom) {
-      list.scrollTop += row.top - viewport.top;
-    }
+    if (standardId) list.querySelector(`[data-standard-id="${CSS.escape(standardId)}"] > summary`)?.setAttribute('aria-current', 'true');
   }
 
   function resume(mode, gesture = true) {
@@ -259,14 +255,25 @@ export function setupLibrary({items, publicItems, listen, shareLink, notify, onC
     save();
     render();
   };
-  search.addEventListener('input', () => {
-    list.scrollTop = 0;
-    render();
-    if (!search.value.trim()) revealPlayingStandard(playingGroupId);
+  const navigation = document.querySelectorAll('[data-library]');
+  for (const button of navigation) button.addEventListener('click', () => {
+    if (view === button.dataset.library) return;
+    const nextView = button.dataset.library;
+    if (nextView !== 'playlists') search.value = '';
+    view = nextView;
+    for (const item of navigation) item.setAttribute('aria-pressed', String(item === button));
+    get('collection').hidden = view === 'playlists';
+    get('playlists').hidden = view !== 'playlists';
+    if (view !== 'playlists') {
+      get('collection-title').textContent = view === 'favorites' ? 'Favoris' : 'Standards';
+      get('listen-favorites').hidden = view !== 'favorites';
+      render();
+    }
   });
+  search.addEventListener('input', render);
   const lookup = id => id ? all().find(version => version.id === id || version.legacyId === id) || null : null;
   return {
-    all, lookup, refresh, revealPlayingStandard,
+    all, lookup, refresh, markPlayingStandard,
     publicRecording: id => publicRecordings.get(id),
     sharedVersions(type, id) {
       if (type === 'standard') return (publicStandards.get(id) || []).map(version => lookup(version.id)).filter(Boolean);
@@ -298,6 +305,7 @@ export function setupLibrary({items, publicItems, listen, shareLink, notify, onC
       } else trackFavorites.add(track.id);
       save();
       get('listen-favorites').disabled = !favorites().length;
+      if (view === 'favorites') render();
     },
     resume,
     state: () => ({favorites: [...trackFavorites], playlists: structuredClone(playlists)}),

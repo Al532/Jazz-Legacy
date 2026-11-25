@@ -61,3 +61,22 @@ export function shuffle(ids, previous = null, random = Math.random) {
   if (result.length > 1 && result[0] === previous) result.push(result.shift());
   return result;
 }
+
+export function groupByStandard(tracks) {
+  const groups = new Map();
+  for (const track of tracks) {
+    const standardId = track.standardId || track.id;
+    if (!groups.has(standardId)) groups.set(standardId, []);
+    groups.get(standardId).push(track);
+  }
+  return groups;
+}
+
+export function shuffleStandards(groups, previous, hasAudio, random = Math.random) {
+  return shuffle(groups.keys(), previous, random).map(standardId => {
+    const versions = groups.get(standardId);
+    const ready = versions.filter(hasAudio);
+    const candidates = ready.length ? ready : versions;
+    return candidates[Math.floor(random() * candidates.length)].id;
+  });
+}

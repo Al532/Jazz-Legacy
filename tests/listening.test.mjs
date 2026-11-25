@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {buildLibrary, playable, playlistRecordings, shuffle} from '../public/listening.mjs';
+import {buildLibrary, groupByStandard, playable, playlistRecordings, shuffle, shuffleStandards} from '../public/listening.mjs';
 
 test('le catalogue, les ajouts existants alimentent le lecteur intégral', async () => {
   const catalogue = JSON.parse(await readFile(new URL('../public/catalogue-data.json', import.meta.url)));
@@ -26,4 +26,18 @@ test('chaque cycle aléatoire contient chaque version une fois et évite la dern
   assert.notEqual(randomized[0], 'a');
   assert.deepEqual(randomized.sort(), ['a','b','c']);
   assert.deepEqual(shuffle(['a'], 'a'), ['a']);
+});
+
+test('la radio choisit une version par standard et évite de rejouer le dernier standard', () => {
+  const tracks = [
+    {id: 'a1', standardId: 'a', mp3: true},
+    {id: 'a2', standardId: 'a'},
+    {id: 'b1', standardId: 'b'},
+    {id: 'c1', standardId: 'c', mp3: true},
+    {id: 'c2', standardId: 'c', mp3: true},
+  ];
+  const groups = groupByStandard(tracks);
+  const queue = shuffleStandards(groups, 'a', track => track.mp3, () => .99);
+  assert.deepEqual(queue, ['b1', 'c2', 'a1']);
+  assert.deepEqual(shuffleStandards(new Map(), 'a', () => false), []);
 });

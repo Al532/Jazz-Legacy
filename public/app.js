@@ -1,5 +1,5 @@
 import {videoIdFromText,clock,mergeItems,keyLabels} from './lib.mjs';
-import {shuffle} from './listening.mjs';
+import {groupByStandard, shuffle, shuffleStandards} from './listening.mjs';
 import {setupLibrary} from './library-ui.mjs';
 import {parseLoudness, volumeForTrack} from './loudness.mjs';
 import {setupAccount} from './account.mjs';
@@ -30,6 +30,7 @@ let syncBusy = false;
 let syncQueued = false;
 let advanceGuard = false;
 let scope = [];
+let radioGroups = new Map();
 let storedAudioIds = new Set();
 let playingStoredAudio = false;
 let pending = [];
@@ -73,12 +74,22 @@ const account = setupAccount(library, updatePlayerUi);
 const localAudio = offlineAudio();
 let offlineIds = new Set();
 let objectUrl;
-let autoplayPending = false;
 let skippedUnavailable = 0;
 let unloadAudio;
 let listeningMode = defaultMode;
+let playerAboveViewport = false;
+let displayedVersions = '';
 
-function lastMode() { return account.mode() || defaultMode; }
+function scopeCount() { return listeningMode.type === 'all' ? radioGroups.size : scope.length; }
+
+function hasDirectAudio(track) {
+  return offlineIds.has(track.id) || storedAudioIds.has(track.videoId) || Boolean(track.audioUrl);
+}
+
+function shuffledQueue(previous = null) {
+  if (listeningMode.type !== 'all') return shuffle(scope, previous?.id);
+  return shuffleStandards(radioGroups, previous?.standardId || previous?.id, hasDirectAudio);
+}
 
 function listen(versions, label, mode, gesture = true, autoplay = true) {
   const tracks = !navigator.onLine || mode.type === 'offline'
@@ -91,25 +102,24 @@ function listen(versions, label, mode, gesture = true, autoplay = true) {
   listeningMode = mode;
   if (gesture) account.mode(mode);
   scope = [...new Set(tracks.map(version => version.id))];
+  if (mode.type === 'all') {
+    const indexed = storedAudioIds.size ? tracks.filter(hasDirectAudio) : [];
+    radioGroups = groupByStandard(indexed.length ? indexed : tracks);
+  }
   scopeLabel = label;
   historyIds = [];
   if (autoplay) {
-    pending = shuffle(scope);
-    playItem(pending.shift(), false, gesture);
+    const fromRadioButton = document.activeElement === $('listen-all');
+    pending = shuffledQueue();
+    playItem(pending.shift());
+    if (fromRadioButton) $('play').focus({preventScroll: true});
   } else {
     currentId = scope[0];
     pending = shuffle(scope.slice(1));
-    library.revealPlayingStandard(current()?.standardId);
     updatePlayerUi();
     notify('Appuie sur Lecture pour lancer l’enregistrement.');
   }
   return true;
-}
-
-function restoreMode(mode, gesture = false) {
-  if (mode.type === 'offline' && listen(library.all(), 'Hors ligne', mode, gesture)) return;
-  if (library.resume(mode, gesture)) return;
-  if (mode.type !== 'all') library.resume(defaultMode, gesture);
 }
 
 async function refreshOffline() {
@@ -128,14 +138,10 @@ function loadLocal() {
 function store() {localStorage.setItem(STORAGE,JSON.stringify(items));render();scheduleSync();}
 function now() {return Date.now();}
 function current() {return library.lookup(currentId);}
-function otherVersion(item) {
-  if (!item) return;
+function availableVersions(item) {
+  if (!item) return [];
   const offlineOnly = !navigator.onLine || listeningMode.type === 'offline';
-  const versions = library.versionsOf(item.standardId).filter(version => !offlineOnly || offlineIds.has(version.id));
-  if (!versions.length) return;
-  const index = versions.findIndex(version => version.id === item.id);
-  const version = versions[(index + 1) % versions.length];
-  if (version.id !== item.id) return version;
+  return library.versionsOf(item.standardId).filter(version => !offlineOnly || offlineIds.has(version.id));
 }
 async function loadStoredAudio() {
   try {
@@ -197,25 +203,87 @@ function updateCover(item) {
 
 function itemUpdate(id,patch) {items=items.map(x=>x.id===id?{...x,...patch,updatedAt:now()}:x);store();updatePlayerUi();}
 function safeInt(value) {return Number.isFinite(value)&&value>=0?value:0;}
+
+function selectVersion(id) {
+  if (id === currentId) return;
+  if (listeningMode.type === 'recording') {
+    library.resume({type: 'recording', id});
+    return;
+  }
+  skippedUnavailable = 0;
+  if (listeningMode.type !== 'all') historyIds.push(currentId);
+  pending = pending.filter(trackId => trackId !== id);
+  playItem(id, {advanceOnError: false});
+}
+
+function updateVersionOptions(item) {
+  const disclosure = $('player-versions');
+  const options = $('version-options');
+  const versions = availableVersions(item);
+  disclosure.hidden = versions.length < 2;
+  const key = JSON.stringify(versions.map(({id, artist, year}) => [id, artist, year]));
+  if (key !== displayedVersions) {
+    displayedVersions = key;
+    disclosure.open = false;
+    options.replaceChildren(...versions.map(version => {
+      const row = document.createElement('li');
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'standard-choice';
+      button.dataset.versionId = version.id;
+      button.textContent = [version.artist || 'Artiste inconnu', version.year].filter(Boolean).join(' · ');
+      button.addEventListener('click', () => selectVersion(version.id));
+      const status = document.createElement('span');
+      status.textContent = 'Version en cours';
+      status.className = 'current-version-label';
+      button.append(status);
+      row.append(button);
+      return row;
+    }));
+  }
+  for (const button of options.querySelectorAll('button')) {
+    const active = button.dataset.versionId === item?.id;
+    button.setAttribute('aria-current', String(active));
+    button.lastElementChild.hidden = !active;
+  }
+}
+
+function updateMiniPlayer(item) {
+  $('mini-player').hidden = !item || !playerAboveViewport;
+  $('mini-title').textContent = item?.title || '';
+  $('mini-artist').textContent = item?.artist || '';
+  $('mini-play').textContent = $('play').textContent;
+  $('mini-play').setAttribute('aria-label', $('play').getAttribute('aria-label'));
+  $('mini-next').disabled = $('next').disabled;
+  $('mini-next').setAttribute('aria-label', $('next-label').textContent);
+}
+
 function updatePlayerUi(){
   const item = current();
+  const radio = listeningMode.type === 'all';
   updateCover(item);
-  const display = [item?.artist, item?.album, item?.year, ...keyLabels({usualKey:item?.usualKey, versionKey:item?.key || item?.versionKey})].filter(Boolean).join(' · ');
+  updateVersionOptions(item);
+  library.markPlayingStandard(item?.standardId);
+  $('radio-intro').hidden = Boolean(item);
+  $('now-playing').hidden = !item;
+  $('listen-all').hidden = Boolean(item) && radio;
+  $('radio-start-label').textContent = item ? 'Écouter des standards au hasard' : 'Lancer l’écoute';
+  $('listening-mode').textContent = scopeLabel || 'En écoute';
   const favorite = $('favorite-track');
   const isFavorite = !!item && library.isFavorite(item.id);
   favorite.disabled = !item;
   favorite.setAttribute('aria-pressed', String(isFavorite));
   favorite.firstElementChild.textContent = isFavorite ? '★' : '☆';
-  $('other-version').disabled = !otherVersion(item);
   $('share-version').disabled = !item || !library.publicRecording(item.id);
-  $('current-title').textContent = item?.title || 'Aucun standard sélectionné';
-  $('current-sub').textContent = item ? [display, scopeLabel].filter(Boolean).join(' · ') : 'Choisis quoi écouter dans la liste.';
+  if ($('current-title').textContent !== (item?.title || '')) $('current-title').textContent = item?.title || '';
+  $('current-artist').textContent = [item?.artist, item?.year].filter(Boolean).join(' · ');
+  $('current-sub').textContent = [item?.album, ...keyLabels({usualKey:item?.usualKey, versionKey:item?.key || item?.versionKey})].filter(Boolean).join(' · ');
   $('current-personnel').replaceChildren(...(item?.musicians || []).map(({name,instrument}) => {
     const musician = document.createElement('li');
     musician.textContent = name + ' — ' + instrument;
     return musician;
   }));
-  $('current-personnel').hidden = !item?.musicians?.length;
+  $('personnel-details').hidden = !item?.musicians?.length;
   $('play').textContent = isPlaying ? '❚❚' : '▶';
   $('play').setAttribute('aria-label', isPlaying ? 'Mettre en pause' : 'Lire');
   $('engine-indicator').textContent = playingStoredAudio ? 'MP3' : objectUrl ? 'Hors ligne' : '';
@@ -223,7 +291,6 @@ function updatePlayerUi(){
   const max = Math.max(1, duration || 120);
   $('seek').max = String(max);
   $('seek').value = String(Math.min(max, safeInt(currentTime)));
-  $('listen-all').setAttribute('aria-pressed', String(listeningMode.type === 'all'));
   $('listen-favorites').setAttribute('aria-pressed', String(listeningMode.type === 'favorites'));
   library.setActivePlaylist(listeningMode.type === 'playlist' ? listeningMode.id : undefined);
   $('seek').disabled = !positionReady;
@@ -231,8 +298,11 @@ function updatePlayerUi(){
   $('time-current').textContent = clock(currentTime);
   $('time-end').textContent = clock(duration || 0);
   $('prev').disabled = !historyIds.length;
-  $('next').disabled = !item || scope.length < 2;
+  $('next').disabled = !item || scopeCount() < 2;
+  $('next-label').textContent = radio ? 'Standard suivant' : 'Enregistrement suivant';
+  $('prev').setAttribute('aria-label', radio ? 'Standard précédent' : 'Enregistrement précédent');
   $('play').disabled = !item && !library.all().length;
+  updateMiniPlayer(item);
 }
 async function addTrack(text, sharedTitle = '') {
   const videoId = videoIdFromText(text);
@@ -255,14 +325,12 @@ async function addTrack(text, sharedTitle = '') {
 
 function pause(){ audio.pause(); setPlaying(false); }
 function setPlaying(playing) {
-  const started = playing && !isPlaying;
   isPlaying = playing;
-  if (started) library.revealPlayingStandard(current()?.standardId);
   updatePlayerUi();
 }
 function next() {
-  if (!scope.length) return;
-  if (!pending.length) pending = shuffle(scope, currentId);
+  if (scopeCount() < 2) return;
+  if (!pending.length) pending = shuffledQueue(current());
   const id = pending.shift();
   if (currentId && currentId !== id) historyIds.push(currentId);
   playItem(id);
@@ -276,12 +344,12 @@ function prev() {
 function autoAdvance(){
   if (advanceGuard || !positionReady) return;
   advanceGuard = true;
-  if (scope.length === 1) {
+  if (scopeCount() === 1) {
     pause();
     seekTo(0);
   } else next();
 }
-async function playItem(id, skipStored = false, gesture = true) {
+async function playItem(id, {skipStored = false, advanceOnError = true} = {}) {
   const item = library.lookup(id);
   if (!item) return;
   const seq = ++operation;
@@ -296,7 +364,6 @@ async function playItem(id, skipStored = false, gesture = true) {
   isPlaying = false;
   positionReady = false;
   advanceGuard = false;
-  autoplayPending = !gesture;
   const storedUrl = !skipStored && storedAudioIds.has(item.videoId) ? '/api/audio/' + item.videoId : null;
   playingStoredAudio = Boolean(storedUrl);
   $('youtube-fallback').hidden = true;
@@ -339,7 +406,6 @@ async function playItem(id, skipStored = false, gesture = true) {
     applyTrackVolume(item);
     await audio.play();
     if (seq !== operation) return;
-    autoplayPending = false;
     skippedUnavailable = 0;
     setPlaying(true);
     notify('');
@@ -347,18 +413,16 @@ async function playItem(id, skipStored = false, gesture = true) {
   } catch (error) {
     if (seq !== operation) return;
     if (error.name === 'NotAllowedError' && positionReady) {
-      autoplayPending = true;
       notify('Appuie sur Lecture pour lancer l’audio.');
       updatePlayerUi();
       return;
     }
-    if (playingStoredAudio && navigator.onLine) return playItem(item.id, true, gesture);
-    if (scope.length > 1 && skippedUnavailable < Math.min(3, scope.length - 1)) {
+    if (playingStoredAudio && navigator.onLine) return playItem(item.id, {skipStored: true, advanceOnError});
+    if (advanceOnError && scopeCount() > 1 && skippedUnavailable < Math.min(3, scopeCount() - 1)) {
       skippedUnavailable++;
       next();
       return;
     }
-    autoplayPending = false;
     showAudioFallback(item, storedAudioStatus);
   }
 }
@@ -404,11 +468,16 @@ function showYouTubeLink(item) {
 }
 
 function togglePlay() {
-  if (!current()) { restoreMode(lastMode(), true); return; }
+  if (!current()) { library.resume(defaultMode); return; }
   if (isPlaying) { pause(); return; }
   advanceGuard = false;
   if (positionReady) {
-    audio.play().then(() => {setPlaying(true);notify('');}).catch(() => playItem(currentId));
+    const seq = operation;
+    audio.play().then(() => {
+      if (seq === operation) { setPlaying(true); notify(''); }
+    }).catch(() => {
+      if (seq === operation) playItem(currentId);
+    });
   } else playItem(currentId);
 }
 
@@ -428,7 +497,7 @@ function setupMedia(item){if(!('mediaSession' in navigator))return;
 audio.addEventListener('ended',autoAdvance);
 audio.addEventListener('pause',()=>setPlaying(false));
 audio.addEventListener('play',()=>setPlaying(true));
-audio.addEventListener('error',()=>{if (positionReady) playItem(currentId, true);});
+audio.addEventListener('error',()=>{if (positionReady) playItem(currentId, {skipStored: true});});
 setInterval(()=>{
   if(positionReady && audio.readyState>0){currentTime=audio.currentTime;duration=Number.isFinite(audio.duration)?audio.duration:duration;}
   $('time-current').textContent = clock(currentTime);
@@ -463,20 +532,15 @@ async function syncNow(){
   finally{syncBusy=false;if(syncQueued){syncQueued=false;scheduleSync();}}
 }
 $('play').addEventListener('click', togglePlay);
-$('next').addEventListener('click', () => { skippedVideos = 0; next(); });
-$('prev').addEventListener('click', () => { skippedVideos = 0; prev(); });
-$('other-version').addEventListener('click', () => {
-  const version = otherVersion(current());
-  if (!version) return;
-  if (listeningMode.type === 'recording') {
-    library.resume({type: 'recording', id: version.id});
-    return;
-  }
-  skippedVideos = 0;
-  historyIds.push(currentId);
-  pending = pending.filter(id => id !== version.id);
-  playItem(version.id);
-});
+$('mini-play').addEventListener('click', togglePlay);
+function skipToNext() { skippedUnavailable = 0; next(); }
+$('next').addEventListener('click', skipToNext);
+$('mini-next').addEventListener('click', skipToNext);
+$('prev').addEventListener('click', () => { skippedUnavailable = 0; prev(); });
+new IntersectionObserver(([entry]) => {
+  playerAboveViewport = entry.boundingClientRect.bottom <= 0;
+  updateMiniPlayer(current());
+}).observe(document.querySelector('.now-panel'));
 $('seek').addEventListener('input',e=>seekTo(e.target.value));
 function jumpBy(delta) {
   if (!positionReady) return;
@@ -503,12 +567,6 @@ window.addEventListener('jazz-session-changed', () => {
 });
 window.addEventListener('offline', updatePlayerUi);
 document.addEventListener('visibilitychange', () => {if (!document.hidden) syncNow();});
-document.addEventListener('click', event => {
-  if (!autoplayPending || isPlaying || !positionReady) return;
-  if (event.target.closest('#play, #prev, #next, #favorite-track, #other-version, #listen-all, #listen-favorites, #playlist-listen, #share-version, .standard-choice, .standard-share, .version-share, a, dialog')) return;
-  autoplayPending = false;
-  togglePlay();
-});
 // Android : NewPipe → Partager → Jazz Legacy. Android transmet souvent le lien dans « text ».
 const query=new URLSearchParams(location.search);const shared=query.get('url')||query.get('text')||'';
 const sharedType = query.has('version') ? 'version' : query.has('standard') ? 'standard' : null;
@@ -527,7 +585,7 @@ Promise.all([library.load(), refreshOffline(), account.ready(), audioIndexReady]
   } else if (shared && videoIdFromText(shared)) {
     history.replaceState(null,'',location.pathname);
     addTrack(shared,query.get('title') || '');
-  } else if (!current()) restoreMode(lastMode());
+  }
 });
 loadSharedLoudness();
 if('serviceWorker' in navigator&&window.isSecureContext)navigator.serviceWorker.register('/sw.js').catch(()=>{});
