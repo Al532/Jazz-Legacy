@@ -158,20 +158,25 @@ def file_hash(path, algorithm):
         return hashlib.file_digest(source, algorithm).hexdigest()
 
 
+def remote_md5(item):
+    return next((value.lower() for name, value in item.get('Hashes', {}).items()
+                 if name.lower() == 'md5'), '')
+
+
 def stage_media(root, stage, selected, listing):
     assets = {}
     for video, path in selected.items():
         old_key = path.relative_to(root).as_posix() if path.suffix.lower() != '.mp3' else path.name
         old = listing.get(old_key, {})
         md5 = file_hash(path, 'md5')
-        if old.get('Hashes', {}).get('MD5', '').lower() == md5 and old.get('Size') == path.stat().st_size:
+        if remote_md5(old) == md5 and old.get('Size') == path.stat().st_size:
             assets[video] = old_key
             continue
         digest = file_hash(path, 'sha256')
         name = digest + path.suffix.lower()
         key = PREFIX + 'media/' + name
         assets[video] = key
-        if key in listing and listing[key].get('Hashes', {}).get('MD5', '').lower() == md5:
+        if key in listing and remote_md5(listing[key]) == md5:
             continue
         destination = stage / name
         if not destination.exists():
@@ -200,7 +205,8 @@ def publish(root, catalogue):
     items = read(root / 'catalogue-local/ajouts-partages.json', [])
     initial = rclone('cat', remote(PREFIX + 'current.json'), allow_missing=True)
     previous = json.loads(initial)['release'] if initial else None
-    listing = {row['Path']: row for row in json.loads(rclone('lsjson', remote(''), '-R', '--files-only', '--hash'))}
+    listing = {row['Path']: row for row in json.loads(rclone(
+        'lsjson', remote(''), '-R', '--files-only', '--hash', '--use-server-modtime'))}
     with tempfile.TemporaryDirectory(dir=root / 'catalogue-local') as temporary:
         stage = Path(temporary) / 'media'
         stage.mkdir()
