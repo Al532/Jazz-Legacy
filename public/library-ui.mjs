@@ -147,7 +147,8 @@ export function setupLibrary({items, publicItems, listen, shareLink, notify, onC
       group.title, group.composer, ...(group.aliases || []),
       ...group.recordings.flatMap(version => [version.artist, version.album]),
     ].join(' ')).includes(query));
-    get('count').textContent = String(candidates.length);
+    const versionCount = candidates.reduce((total, group) => total + group.recordings.length, 0);
+    get('count').textContent = `${candidates.length} (${versionCount} ${versionCount === 1 ? 'version' : 'versions'})`;
     get('listen-all').disabled = !all().length;
     get('listen-favorites').disabled = !favorites().length;
     renderPlaylists();
