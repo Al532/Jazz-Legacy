@@ -22,13 +22,29 @@ export function embedYouTube(container, id, events) {
   let player;
   let closed = false;
   let ready = false;
-  const play = (scroll = false) => {
+  let wantsPlayback = true;
+  let manual = false;
+  let started = false;
+  const prompt = () => events.prompt({manual});
+  const pause = () => {
+    wantsPlayback = false;
+    if (ready) player.pauseVideo();
+  };
+  const background = () => {
+    const awaitingStart = wantsPlayback && !started;
+    pause();
+    if (awaitingStart) prompt();
+    else events.paused();
+  };
+  const play = (fromControl = false) => {
+    wantsPlayback = true;
+    manual ||= fromControl;
     if (!ready) return;
     const {top, bottom, height} = container.getBoundingClientRect();
     const visible = Math.min(window.innerHeight, bottom) - Math.max(0, top);
-    if (document.hidden || !height || visible < height / 2) {
-      events.prompt();
-      if (scroll && !document.hidden) container.scrollIntoView({block: 'nearest'});
+    if (document.hidden || visible <= height / 2) {
+      if (fromControl && !document.hidden) container.scrollIntoView({block: 'nearest'});
+      prompt();
       return;
     }
     player.playVideo();
@@ -37,33 +53,45 @@ export function embedYouTube(container, id, events) {
   container.hidden = false;
   loadAPI().then(YT => {
     if (closed) return;
-    const mount = document.createElement('div');
-    container.replaceChildren(mount);
-    player = new YT.Player(mount, {
-      videoId: id,
-      playerVars: {origin: location.origin, playsinline: 1},
+    const iframe = document.createElement('iframe');
+    const params = new URLSearchParams({enablejsapi: '1', origin: location.origin, playsinline: '1'});
+    iframe.src = 'https://www.youtube.com/embed/' + encodeURIComponent(id) + '?' + params;
+    iframe.title = 'Lecteur YouTube';
+    iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
+    iframe.allowFullscreen = true;
+    container.replaceChildren(iframe);
+    player = new YT.Player(iframe, {
       events: {
         onReady: () => {
           if (closed) return;
           clearTimeout(timeout);
           ready = true;
           events.ready();
-          play();
+          if (wantsPlayback) play();
         },
         onStateChange: ({data}) => {
           if (closed || !ready) return;
-          if (data === YT.PlayerState.PLAYING) events.playing();
+          if (data === YT.PlayerState.PLAYING) {
+            if (document.hidden) {
+              background();
+              return;
+            }
+            started = true;
+            wantsPlayback = true;
+            events.playing();
+          }
           if (data === YT.PlayerState.PAUSED) events.paused();
           if (data === YT.PlayerState.ENDED) events.ended();
         },
-        onAutoplayBlocked: () => { if (!closed) events.prompt(); },
+        onAutoplayBlocked: () => { if (!closed && wantsPlayback) prompt(); },
         onError: () => { if (!closed) events.error(); },
       },
     });
   }).catch(() => { if (!closed) events.error(); });
   return {
     play,
-    pause: () => { if (ready) player.pauseVideo(); },
+    pause,
+    background,
     seek: time => { if (ready) player.seekTo(time, true); },
     time: () => ready ? player.getCurrentTime() : 0,
     duration: () => ready ? player.getDuration() : 0,

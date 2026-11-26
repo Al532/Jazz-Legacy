@@ -45,7 +45,7 @@ let loudnessLoad;
 let loudnessExpires = 0;
 
 function applyTrackVolume(item) {
-  if (item) audio.volume = volumeForTrack(item, loudnessRecords);
+  if (item) audio.volume = playingYouTube ? 1 : volumeForTrack(item, loudnessRecords);
 }
 
 function loadSharedLoudness() {
@@ -346,12 +346,12 @@ function setPlaying(playing) {
   isPlaying = playing;
   updatePlayerUi();
 }
-function next() {
+function next({automatic = false} = {}) {
   if (scopeCount() < 2) return;
   if (!pending.length) pending = shuffledQueue(current());
   const id = pending.shift();
   if (currentId && currentId !== id) historyIds.push(currentId);
-  playItem(id);
+  playItem(id, {automatic});
 }
 function prev() {
   const id = historyIds.pop();
@@ -365,9 +365,17 @@ function autoAdvance(){
   if (scopeCount() === 1) {
     pause();
     seekTo(0);
-  } else next();
+  } else next({automatic: true});
 }
-async function playItem(id, {skipStored = false, advanceOnError = true} = {}) {
+
+function skipUnavailable(limit) {
+  if (scopeCount() < 2 || skippedUnavailable >= Math.min(limit, scopeCount() - 1)) return false;
+  skippedUnavailable++;
+  next({automatic: true});
+  return true;
+}
+
+async function playItem(id, {skipStored = false, advanceOnError = true, automatic = false} = {}) {
   const item = library.lookup(id);
   if (!item) return;
   const seq = ++operation;
@@ -443,8 +451,9 @@ async function playItem(id, {skipStored = false, advanceOnError = true} = {}) {
       updatePlayerUi();
       return;
     }
-    if (playingStoredAudio && navigator.onLine) return playItem(item.id, {skipStored: true, advanceOnError});
+    if (playingStoredAudio && navigator.onLine) return playItem(item.id, {skipStored: true, advanceOnError, automatic});
     if (navigator.onLine && item.youtubeImportId) {
+      if (automatic && document.hidden && skipUnavailable(Infinity)) return;
       positionReady = false;
       playingYouTube = true;
       showYouTubeLink(item);
@@ -454,8 +463,12 @@ async function playItem(id, {skipStored = false, advanceOnError = true} = {}) {
         playing() { skippedUnavailable = 0; setPlaying(true); notify(''); setupMedia(item); },
         paused() { setPlaying(false); },
         ended: autoAdvance,
-        prompt() { notify('Appuie sur Lecture pour lancer la vidéo YouTube.'); },
+        prompt({manual}) {
+          if (automatic && !manual && skipUnavailable(Infinity)) return;
+          notify('Appuie sur Lecture pour lancer la vidéo YouTube.');
+        },
         error() {
+          if (automatic && skipUnavailable(Infinity)) return;
           youtubePlayer?.close();
           youtubePlayer = undefined;
           positionReady = false;
@@ -466,11 +479,7 @@ async function playItem(id, {skipStored = false, advanceOnError = true} = {}) {
       updatePlayerUi();
       return;
     }
-    if (advanceOnError && scopeCount() > 1 && skippedUnavailable < Math.min(3, scopeCount() - 1)) {
-      skippedUnavailable++;
-      next();
-      return;
-    }
+    if (advanceOnError && skipUnavailable(3)) return;
     showAudioFallback(item, storedAudioStatus);
   }
 }
@@ -635,8 +644,8 @@ window.addEventListener('jazz-session-changed', () => {
 });
 window.addEventListener('offline', render);
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden && youtubePlayer) pause();
-  if (!document.hidden) syncNow();
+  if (document.hidden) youtubePlayer?.background();
+  else syncNow();
 });
 // Android : NewPipe → Partager → Jazz Legacy. Android transmet souvent le lien dans « text ».
 const query=new URLSearchParams(location.search);

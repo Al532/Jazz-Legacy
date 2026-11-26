@@ -3,6 +3,16 @@ import assert from 'node:assert/strict';
 import worker from '../dist/server/index.js';
 import {parseLoudness, volumeForTrack} from '../public/loudness.mjs';
 
+test('a quiet outlier does not turn down the rest of the MP3 catalogue', () => {
+  const track = {videoId: 'QI3wWiquZGc'};
+  const records = parseLoudness({tracks: [
+    {youtubeId: track.videoId, gainDb: -1},
+    {youtubeId: 'kADmgRtwXaU', gainDb: 12},
+  ]});
+  assert.equal(volumeForTrack(track, records), 10 ** (-4 / 20));
+  assert.equal(volumeForTrack({videoId: 'kADmgRtwXaU'}, records), 1);
+});
+
 const env = {
   HEADS_R2_ENDPOINT: 'https://0123456789abcdef0123456789abcdef.r2.cloudflarestorage.com',
   HEADS_R2_KEY_ID: 'loudness-test-key',
@@ -42,7 +52,7 @@ test('shared loudness is loaded from the private R2 file for the owner across de
   assert.equal(fetch.mock.callCount(), 2);
   const records = parseLoudness(first.data);
   assert.equal(volumeForTrack({videoId: 'kADmgRtwXaU'}, records), 1);
-  assert.ok(Math.abs(volumeForTrack({videoId: 'QI3wWiquZGc'}, records) - 10 ** (-10 / 20)) < 1e-9);
+  assert.equal(volumeForTrack({videoId: 'QI3wWiquZGc'}, records), 10 ** (-9 / 20));
   assert.equal(volumeForTrack({videoId: 'missing'}, records), 1);
   assert.equal((await worker.fetch(request('/api/loudness', 'owner@example.test', {method: 'PUT'}), env)).status, 405);
 });

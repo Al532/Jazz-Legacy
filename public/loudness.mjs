@@ -1,6 +1,7 @@
 import {videoIdFromText} from './lib.mjs';
 
 const targetLufs = -16;
+const playbackHeadroomDb = 3;
 
 function recordingKeys(value) {
   if (typeof value !== 'string') return [];
@@ -52,7 +53,8 @@ export function volumeForTrack(track, records) {
   const keys = new Set([track.id, track.videoId, track.audioUrl].flatMap(recordingKeys));
   const record = records.find(entry => entry.keys.some(key => keys.has(key)));
   if (!record) return 1;
-  // Use a shared ceiling so quieter measured tracks can stay at full volume without clipping.
-  const ceiling = records.reduce((max, entry) => Math.max(max, entry.db), 0);
-  return 10 ** (Math.max(-60, record.db - ceiling) / 20);
+  // Cap positive gains at the media element's full volume. Quiet outliers
+  // should not force extra attenuation on the entire catalogue.
+  const gainDb = Math.max(-60, Math.min(0, record.db - playbackHeadroomDb));
+  return 10 ** (gainDb / 20);
 }
