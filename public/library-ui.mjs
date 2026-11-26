@@ -31,7 +31,7 @@ function shareAction(label, className, onClick) {
   return button;
 }
 
-export function setupLibrary({items, publicItems, listen, shareLink, notify, onChange}) {
+export function setupLibrary({items, publicItems, canListen, listen, shareLink, notify, onChange}) {
   let base = [];
   let cataloguePromise;
   const personal = read(catalogueStorage, {});
@@ -53,7 +53,7 @@ export function setupLibrary({items, publicItems, listen, shareLink, notify, onC
   const selected = () => playlists.find(playlist => playlist.id === playlistId);
   const all = () => groups.flatMap(playable);
   const isFavoriteTrack = track => track && (trackFavorites.has(track.id) || trackFavorites.has(track.legacyId));
-  const favorites = () => all().filter(isFavoriteTrack);
+  const favorites = () => all().filter(track => isFavoriteTrack(track) && canListen(track));
   const normalize = text => String(text || '').normalize('NFD').replace(/\p{M}/gu, '').toLocaleLowerCase('fr');
 
   function migrateFavorites() {
@@ -139,10 +139,11 @@ export function setupLibrary({items, publicItems, listen, shareLink, notify, onC
   function render() {
     const query = normalize(search.value.trim());
     const showingFavorites = view === 'favorites';
-    const visibleGroups = showingFavorites ? groups.flatMap(group => {
-      const recordings = playable(group).filter(isFavoriteTrack);
-      return recordings.length ? [{...group, recordings}] : [];
-    }) : groups;
+    const visibleGroups = groups.flatMap(group => {
+      const recordings = group.recordings.filter(track =>
+        canListen(track) && (!showingFavorites || isFavoriteTrack(track)));
+      return !showingFavorites || recordings.length ? [{...group, recordings}] : [];
+    });
     const candidates = visibleGroups.filter(group => !query || normalize([
       group.title, group.composer, ...(group.aliases || []),
       ...group.recordings.flatMap(version => [version.artist, version.album]),
@@ -178,7 +179,7 @@ export function setupLibrary({items, publicItems, listen, shareLink, notify, onC
       summary.append(heading);
       if (playingGroupId === group.id) summary.setAttribute('aria-current', 'true');
       details.append(summary);
-      const versions = playable(group);
+      const versions = group.recordings;
       if (versions.length) {
         const choices = element('ul', '', 'standard-choices');
         for (const version of versions) {

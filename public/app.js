@@ -32,6 +32,7 @@ let advanceGuard = false;
 let scope = [];
 let radioGroups = new Map();
 let storedAudioIds = new Set();
+let offlineIds = new Set();
 let playingStoredAudio = false;
 let pending = [];
 let historyIds = [];
@@ -68,11 +69,10 @@ const defaultMode = {type: 'all'};
 const library = setupLibrary({
   items: () => mergeItems(items, sharedItems),
   publicItems: () => sharedItems,
-  listen, shareLink, notify, onChange: () => account.changed(),
+  canListen, listen, shareLink, notify, onChange: () => account.changed(),
 });
 const account = setupAccount(library, updatePlayerUi);
 const localAudio = offlineAudio();
-let offlineIds = new Set();
 let objectUrl;
 let skippedUnavailable = 0;
 let unloadAudio;
@@ -84,6 +84,10 @@ function scopeCount() { return listeningMode.type === 'all' ? radioGroups.size :
 
 function hasDirectAudio(track) {
   return offlineIds.has(track.id) || storedAudioIds.has(track.videoId) || Boolean(track.audioUrl);
+}
+
+function canListen(track) {
+  return navigator.onLine ? hasDirectAudio(track) : offlineIds.has(track.id);
 }
 
 function shuffledQueue(previous = null) {
@@ -125,7 +129,7 @@ function listen(versions, label, mode, gesture = true, autoplay = true) {
 async function refreshOffline() {
   try { offlineIds = new Set(await localAudio.keys()); }
   catch { offlineIds = new Set(); }
-  updatePlayerUi();
+  render();
 }
 
 function loadLocal() {
@@ -140,15 +144,21 @@ function now() {return Date.now();}
 function current() {return library.lookup(currentId);}
 function availableVersions(item) {
   if (!item) return [];
-  const offlineOnly = !navigator.onLine || listeningMode.type === 'offline';
-  return library.versionsOf(item.standardId).filter(version => !offlineOnly || offlineIds.has(version.id));
+  return library.versionsOf(item.standardId).filter(listeningMode.type === 'offline'
+    ? version => offlineIds.has(version.id) : canListen);
 }
 async function loadStoredAudio() {
   try {
     if (!navigator.onLine) return;
     const response = await fetch('/api/audio', {cache: 'no-store', signal: AbortSignal.timeout(4000)});
     const {ids} = await response.json();
-    if (response.ok && Array.isArray(ids)) storedAudioIds = new Set(ids);
+    if (response.ok && Array.isArray(ids)) {
+      const nextIds = new Set(ids);
+      if (nextIds.size !== storedAudioIds.size || ids.some(id => !storedAudioIds.has(id))) {
+        storedAudioIds = nextIds;
+        render();
+      }
+    }
   } catch { /* Existing playback sources stay available. */ }
 }
 function render() {library.refresh();updatePlayerUi();}
@@ -392,7 +402,10 @@ async function playItem(id, {skipStored = false, advanceOnError = true} = {}) {
         url = stream.url;
         if (stream.storedAudio === 'available') {
           playingStoredAudio = true;
-          storedAudioIds.add(item.videoId);
+          if (!storedAudioIds.has(item.videoId)) {
+            storedAudioIds.add(item.videoId);
+            library.refresh();
+          }
         }
       }
     }
@@ -559,13 +572,13 @@ $('favorite-track').addEventListener('click', () => {
   updatePlayerUi();
 });
 document.addEventListener('keydown',e=>{if(e.code==='Space'&&!['INPUT','TEXTAREA','SELECT','BUTTON'].includes(document.activeElement?.tagName)&&!document.activeElement?.closest('textarea, summary, a')&&!document.querySelector('dialog[open]')){e.preventDefault();togglePlay();}});
-window.addEventListener('online', () => {updatePlayerUi(); syncNow(); loadStoredAudio(); loadSharedLoudness();});
+window.addEventListener('online', () => {render(); syncNow(); loadStoredAudio(); loadSharedLoudness();});
 window.addEventListener('jazz-session-changed', () => {
   loudnessExpires = 0;
   loadStoredAudio();
   loadSharedLoudness();
 });
-window.addEventListener('offline', updatePlayerUi);
+window.addEventListener('offline', render);
 document.addEventListener('visibilitychange', () => {if (!document.hidden) syncNow();});
 // Android : NewPipe → Partager → Jazz Legacy. Android transmet souvent le lien dans « text ».
 const query=new URLSearchParams(location.search);const shared=query.get('url')||query.get('text')||'';

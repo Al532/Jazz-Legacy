@@ -1,4 +1,4 @@
-const CACHE = 'jazz-legacy-shell-v32';
+const CACHE = 'jazz-legacy-shell-v33';
 const CATALOGUE = '/catalogue-data.json';
 const FILES = [
   '/', '/styles.css', '/app.js', '/lib.mjs', '/listening.mjs', '/loudness.mjs',
