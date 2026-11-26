@@ -1,5 +1,10 @@
 import {visibleItems} from './lib.mjs';
 
+function recordingYear({year}) {
+  const value = Number(year);
+  return Number.isInteger(value) && value > 0 ? value : Number.MAX_SAFE_INTEGER;
+}
+
 export function buildLibrary(catalogue, items) {
   const personal = new Map(visibleItems(items).map(item => [item.videoId, item]));
   const linked = new Set();
@@ -37,7 +42,11 @@ export function buildLibrary(catalogue, items) {
       usualKey: item.usualKey || group.usualKey, key: item.versionKey,
     });
   }
-  return [...groups, ...custom.values()];
+  const library = [...groups, ...custom.values()];
+  for (const group of library) {
+    group.recordings.sort((a, b) => recordingYear(a) - recordingYear(b));
+  }
+  return library;
 }
 
 export function playable(group) {

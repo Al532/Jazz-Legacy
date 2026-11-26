@@ -21,6 +21,18 @@ test('le catalogue, les ajouts existants alimentent le lecteur intégral', async
   assert.deepEqual(playlistRecordings(groups, ['version:' + cannonball.id]), [cannonball]);
 });
 
+test('les versions sont triées par année dans chaque standard sans changer leur identifiant', () => {
+  const groups = buildLibrary([
+    {id: 'first', versions: [{year: 1954}, {}, {year: '1949'}, {year: 1954}]},
+    {id: 'second', versions: [{year: 1930}]},
+  ], [{id: 'personal', standardId: 'first', title: 'Premier standard', videoId: 'abcdefghijk', year: 1940}]);
+
+  assert.deepEqual(groups.map(group => group.id), ['first', 'second']);
+  assert.deepEqual(groups[0].recordings.map(version => version.id), [
+    'personal', 'first:2', 'first:0', 'first:3', 'first:1',
+  ]);
+});
+
 test('chaque cycle aléatoire contient chaque version une fois et évite la dernière en tête', () => {
   const randomized = shuffle(['a','b','c','c'], 'a', () => 0.99);
   assert.notEqual(randomized[0], 'a');
