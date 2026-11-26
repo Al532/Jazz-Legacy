@@ -1,7 +1,8 @@
-import {buildLibrary, playable, playlistRecordings} from './listening.mjs';
+import {addPlaylistVersion, buildLibrary, keepImportsInPlaylists, playable, playlistRecordings} from './listening.mjs';
 
 const catalogueStorage = 'heads.catalogue.personal.v1';
 const playlistsStorage = 'heads.playlists.v1';
+const importsStorage = 'jazz-legacy.youtube-imports';
 const get = id => document.getElementById(id);
 const read = (key, fallback) => {
   try { return JSON.parse(localStorage.getItem(key)) ?? fallback; }
@@ -38,6 +39,8 @@ export function setupLibrary({items, publicItems, canListen, listen, shareLink, 
   const trackFavorites = new Set(personal.trackFavorites || []);
   const legacyFavorites = new Set(personal.favorites || []);
   let playlists = read(playlistsStorage, []);
+  let imports = read(importsStorage, []);
+  keepImportsInPlaylists(playlists, imports);
   let guest = true;
   let groups = [];
   let publicStandards = new Map();
@@ -52,7 +55,7 @@ export function setupLibrary({items, publicItems, canListen, listen, shareLink, 
   let view = 'standards';
   const selected = () => playlists.find(playlist => playlist.id === playlistId);
   const all = () => groups.flatMap(playable);
-  const isFavoriteTrack = track => track && (trackFavorites.has(track.id) || trackFavorites.has(track.legacyId));
+  const isFavoriteTrack = track => track && [track.id, track.legacyId, track.youtubeImportId].some(id => trackFavorites.has(id));
   const favorites = () => all().filter(track => isFavoriteTrack(track) && canListen(track));
   const normalize = text => String(text || '').normalize('NFD').replace(/\p{M}/gu, '').toLocaleLowerCase('fr');
 
@@ -74,6 +77,7 @@ export function setupLibrary({items, publicItems, canListen, listen, shareLink, 
         ...personal, favorites: [...legacyFavorites], trackFavorites: [...trackFavorites],
       }));
       localStorage.setItem(playlistsStorage, JSON.stringify(playlists));
+      localStorage.setItem(importsStorage, JSON.stringify(imports));
     }
     onChange();
   }
@@ -85,7 +89,7 @@ export function setupLibrary({items, publicItems, canListen, listen, shareLink, 
         .filter((version, index, versions) => !version.youtube ||
           versions.findIndex(entry => entry.youtube === version.youtube) === index),
     }));
-    groups = buildLibrary(catalogue, items());
+    groups = buildLibrary(catalogue, [...items(), ...imports]);
     publicStandards = new Map();
     publicRecordings = new Map();
     for (const group of buildLibrary(base, publicItems())) {
@@ -111,6 +115,16 @@ export function setupLibrary({items, publicItems, canListen, listen, shareLink, 
     get('playlist-listen').disabled = !playlist || !playlistRecordings(groups, playlist.entries).length;
     get('playlist-rename').disabled = !playlist;
     get('playlist-delete').disabled = !playlist;
+    const recordings = document.createDocumentFragment();
+    if (playlist) for (const version of playlistRecordings(groups, playlist.entries)) {
+      const row = element('li');
+      const button = action([version.title, version.artist].filter(Boolean).join(' – '),
+        () => resume({type: 'playlist', id: playlist.id}, true, version.id), !canListen(version));
+      button.className = 'standard-choice';
+      row.append(button);
+      recordings.append(row);
+    }
+    get('playlist-versions').replaceChildren(recordings);
     showMembership();
   }
 
@@ -118,9 +132,10 @@ export function setupLibrary({items, publicItems, canListen, listen, shareLink, 
     const playlist = selected();
     get('playlist-membership').hidden = !playlist || !playlistTrack;
     if (!playlist || !playlistTrack) return;
-    const {id, legacyId, standardId} = playlistTrack;
+    const {id, legacyId, standardId, youtubeImportId} = playlistTrack;
+    const versionRefs = [...new Set([youtubeImportId, id, legacyId].filter(Boolean).map(value => `version:${value}`))];
     for (const [buttonId, refs, label] of [
-      ['playlist-track', [`version:${id}`, ...(legacyId ? [`version:${legacyId}`] : [])], 'la version en cours'],
+      ['playlist-track', versionRefs, 'la version en cours'],
       ['playlist-standard', [`standard:${standardId}`], 'le standard en cours'],
     ]) {
       const button = get(buttonId);
@@ -128,8 +143,15 @@ export function setupLibrary({items, publicItems, canListen, listen, shareLink, 
       button.textContent = (added ? 'Retirer ' : 'Ajouter ') + label;
       button.setAttribute('aria-pressed', String(added));
       button.onclick = () => {
+        const before = [...playlist.entries];
         if (added) playlist.entries = playlist.entries.filter(entry => !refs.includes(entry));
         else playlist.entries.push(refs[0]);
+        if (added && imports.some(item => refs.includes(`version:${item.id}`) &&
+            !playlists.some(entry => entry.entries.includes(`version:${item.id}`)))) {
+          playlist.entries = before;
+          notify('Ajoute d’abord cette version à une autre playlist.');
+          return;
+        }
         save();
         renderPlaylists();
       };
@@ -212,7 +234,7 @@ export function setupLibrary({items, publicItems, canListen, listen, shareLink, 
     if (standardId) list.querySelector(`[data-standard-id="${CSS.escape(standardId)}"] > summary`)?.setAttribute('aria-current', 'true');
   }
 
-  function resume(mode, gesture = true) {
+  function resume(mode, gesture = true, firstId) {
     if (mode.type === 'all') return listen(all(), 'Standards au hasard', mode, gesture);
     if (mode.type === 'favorites') return listen(favorites(), 'Favoris', mode, gesture);
     if (mode.type === 'recording') {
@@ -224,7 +246,7 @@ export function setupLibrary({items, publicItems, canListen, listen, shareLink, 
       if (!playlist) return false;
       playlistId = playlist.id;
       renderPlaylists();
-      return listen(playlistRecordings(groups, playlist.entries), playlist.name, mode, gesture);
+      return listen(playlistRecordings(groups, playlist.entries), playlist.name, mode, gesture, true, firstId);
     }
     return false;
   }
@@ -254,28 +276,73 @@ export function setupLibrary({items, publicItems, canListen, listen, shareLink, 
     if (!selected() || !confirm(`Supprimer la playlist « ${selected().name} » ?`)) return;
     playlists = playlists.filter(playlist => playlist.id !== playlistId);
     playlistId = '';
+    keepImportsInPlaylists(playlists, imports);
     save();
     render();
   };
   const navigation = document.querySelectorAll('[data-library]');
-  for (const button of navigation) button.addEventListener('click', () => {
-    if (view === button.dataset.library) return;
-    const nextView = button.dataset.library;
-    if (nextView !== 'playlists') search.value = '';
+  function showView(nextView) {
+    if (view === nextView) return;
     view = nextView;
-    for (const item of navigation) item.setAttribute('aria-pressed', String(item === button));
-    get('collection').hidden = view === 'playlists';
+    const showCollection = view === 'standards' || view === 'favorites';
+    for (const item of navigation) item.setAttribute('aria-pressed', String(item.dataset.library === view));
+    get('collection').hidden = !showCollection;
     get('playlists').hidden = view !== 'playlists';
-    if (view !== 'playlists') {
+    get('import-panel').hidden = view !== 'import';
+    if (showCollection) {
+      search.value = '';
       get('collection-title').textContent = view === 'favorites' ? 'Favoris' : 'Standards';
       get('listen-favorites').hidden = view !== 'favorites';
       render();
     }
+  }
+  for (const button of navigation) button.addEventListener('click', () => {
+    showView(button.dataset.library);
+    if (view === 'import') get('youtube-link').focus();
   });
   search.addEventListener('input', render);
-  const lookup = id => id ? all().find(version => version.id === id || version.legacyId === id) || null : null;
+  const lookup = id => id ? all().find(version => version.id === id || version.legacyId === id || version.youtubeImportId === id) || null : null;
   return {
     all, lookup, refresh, markPlayingStandard,
+    showImport: () => showView('import'),
+    importOptions: () => ({standards: groups, playlists: playlists.map(({id, name}) => ({id, name}))}),
+    migrateGuestImports(candidates) {
+      const state = this.guestState();
+      const migrated = new Set();
+      for (const entry of candidates) {
+        if (entry.deleted || !/^[\w-]{11}$/.test(entry.videoId) || !entry.title ||
+            [...publicRecordings.values()].some(version =>
+              [version.videoId, version.previousYoutube, version.duplicateYoutube].includes(entry.videoId))) continue;
+        const id = `youtube:${entry.videoId}`;
+        if (!state.imports.some(item => item.id === id)) {
+          state.imports.push({id, videoId: entry.videoId, title: entry.title, artist: entry.artist,
+            order: entry.order, updatedAt: entry.updatedAt, usualKey: entry.usualKey, versionKey: entry.versionKey,
+            legacyId: entry.id, standardId: entry.standardId || `custom:${entry.id}`});
+        }
+        for (const playlist of state.playlists) {
+          playlist.entries = [...new Set(playlist.entries.map(ref => ref === `version:${entry.id}` ? `version:${id}` : ref))];
+        }
+        migrated.add(entry.id);
+      }
+      if (!migrated.size) return migrated;
+      keepImportsInPlaylists(state.playlists, state.imports);
+      localStorage.setItem(importsStorage, JSON.stringify(state.imports));
+      localStorage.setItem(playlistsStorage, JSON.stringify(state.playlists));
+      if (guest) this.setState(state, true);
+      return migrated;
+    },
+    saveImport({versionId, item, destination}) {
+      if (!addPlaylistVersion(playlists, destination, versionId)) return false;
+      if (item && !imports.some(entry => entry.id === item.id)) imports.push(item);
+      save();
+      refresh();
+      playlistId = destination;
+      showView('playlists');
+      renderPlaylists();
+      get('playlist-select').focus();
+      notify('Version enregistrée dans « ' + selected().name + ' ».');
+      return true;
+    },
     publicRecording: id => publicRecordings.get(id),
     sharedVersions(type, id) {
       if (type === 'standard') return (publicStandards.get(id) || []).map(version => lookup(version.id)).filter(Boolean);
@@ -296,7 +363,7 @@ export function setupLibrary({items, publicItems, canListen, listen, shareLink, 
       playlistTrack = item;
       showMembership();
     },
-    byVideo: id => all().find(version => version.videoId === id),
+    byVideo: id => all().find(version => [version.videoId, version.previousYoutube, version.duplicateYoutube, version.importVideoId].includes(id)),
     isFavorite: id => Boolean(isFavoriteTrack(lookup(id))),
     toggleFavorite(id) {
       const track = lookup(id);
@@ -304,18 +371,21 @@ export function setupLibrary({items, publicItems, canListen, listen, shareLink, 
       if (isFavoriteTrack(track)) {
         trackFavorites.delete(track.id);
         trackFavorites.delete(track.legacyId);
+        trackFavorites.delete(track.youtubeImportId);
       } else trackFavorites.add(track.id);
       save();
       get('listen-favorites').disabled = !favorites().length;
       if (view === 'favorites') render();
     },
     resume,
-    state: () => ({favorites: [...trackFavorites], playlists: structuredClone(playlists)}),
+    state: () => ({favorites: [...trackFavorites], playlists: structuredClone(playlists), imports: [...imports]}),
     setState(state, isGuest) {
       guest = isGuest;
       trackFavorites.clear();
       for (const id of state.favorites || []) trackFavorites.add(id);
       playlists = structuredClone(state.playlists || []);
+      imports = [...(state.imports || [])];
+      keepImportsInPlaylists(playlists, imports);
       if (!selected()) playlistId = '';
       refresh();
     },
@@ -326,7 +396,10 @@ export function setupLibrary({items, publicItems, canListen, listen, shareLink, 
       for (const group of groups) if (standardIds.has(group.id)) {
         for (const track of playable(group)) favorites.add(track.id);
       }
-      return {favorites: [...favorites], playlists: read(playlistsStorage, [])};
+      const guestImports = read(importsStorage, []);
+      const guestPlaylists = read(playlistsStorage, []);
+      keepImportsInPlaylists(guestPlaylists, guestImports);
+      return {favorites: [...favorites], playlists: guestPlaylists, imports: guestImports};
     },
     load() {
       cataloguePromise ||= (async () => {

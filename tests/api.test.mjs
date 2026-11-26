@@ -31,3 +31,17 @@ test('an unavailable external stream has a usable fallback and the manifest decl
  const manifest = await (await worker.fetch(req('/manifest.webmanifest'), {})).json();
  assert.equal(manifest.share_target.enctype, 'application/x-www-form-urlencoded');
 });
+
+test('YouTube metadata distinguishes a verified video from an inaccessible video or upstream failure', async t => {
+ const path = '/api/meta/kADmgRtwXaU';
+ const upstream = t.mock.method(globalThis, 'fetch', async url => {
+   assert.equal(url.origin, 'https://www.youtube.com');
+   assert.equal(url.searchParams.get('url'), 'https://www.youtube.com/watch?v=kADmgRtwXaU');
+   return Response.json({title: 'Blue Bossa', author_name: 'Artiste'});
+ });
+ assert.deepEqual(await (await worker.fetch(req(path), {})).json(), {title: 'Blue Bossa', uploader: 'Artiste'});
+ upstream.mock.mockImplementation(async () => new Response(null, {status: 401}));
+ assert.equal((await worker.fetch(req(path), {})).status, 404);
+ upstream.mock.mockImplementation(async () => new Response(null, {status: 429}));
+ assert.equal((await worker.fetch(req(path), {})).status, 502);
+});

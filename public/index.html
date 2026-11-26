@@ -14,6 +14,7 @@
       <button class="nav-button" type="button" data-library="standards" aria-controls="collection" aria-pressed="true">Standards</button>
       <button class="nav-button" type="button" data-library="favorites" aria-controls="collection" aria-pressed="false">Favoris</button>
       <button class="nav-button" type="button" data-library="playlists" aria-controls="playlists" aria-pressed="false">Playlists</button>
+      <button class="nav-button" type="button" data-library="import" aria-controls="import-panel" aria-pressed="false">Importer</button>
     </nav>
     <div class="top-actions"><button class="btn-outline" id="account-button" type="button">Mon compte</button></div>
   </header>
@@ -49,6 +50,7 @@
           <button id="forward-five" type="button" class="btn-outline skip-time" aria-label="Avancer de 5 secondes" disabled>+5 s</button>
         </div>
         <button id="next" class="btn-outline next-track" type="button"><span id="next-label">Enregistrement suivant</span><span aria-hidden="true">→</span></button>
+        <div id="youtube-player" class="youtube-player" hidden></div>
         <details id="player-versions" class="player-disclosure" hidden>
           <summary>Versions du standard</summary>
           <ul id="version-options" class="standard-choices"></ul>
@@ -84,6 +86,37 @@
         <button id="playlist-track" class="btn-outline" type="button"></button>
         <button id="playlist-standard" class="btn-outline" type="button"></button>
       </div>
+      <ul id="playlist-versions" class="standard-choices"></ul>
+    </section>
+    <section class="panel import-panel" id="import-panel" aria-labelledby="youtube-import-title" hidden>
+      <h2 id="youtube-import-title">Importer un lien YouTube</h2>
+      <form id="youtube-link-form">
+        <label for="youtube-link">Lien de la vidéo</label>
+        <div class="import-link-row">
+          <input id="youtube-link" type="text" inputmode="url" required maxlength="4096" autocomplete="off" placeholder="https://youtu.be/…">
+          <button class="btn-outline" type="submit">Vérifier le lien</button>
+        </div>
+      </form>
+      <p id="youtube-import-status" role="status"></p>
+      <form id="youtube-save-form" hidden>
+        <div class="youtube-preview">
+          <img id="youtube-preview-cover" alt="" width="96" height="72">
+          <div><strong id="youtube-preview-title"></strong><br><span id="youtube-preview-channel"></span></div>
+        </div>
+        <div id="youtube-standard-fields">
+          <label for="youtube-standard">Standard</label>
+          <select id="youtube-standard"></select>
+          <div id="youtube-new-standard">
+            <label for="youtube-standard-name">Nom du standard</label>
+            <input id="youtube-standard-name" maxlength="240">
+          </div>
+          <label for="youtube-artist">Artiste</label>
+          <input id="youtube-artist" maxlength="240">
+        </div>
+        <label for="youtube-playlist">Playlist de destination</label>
+        <select id="youtube-playlist" required></select>
+        <button class="btn-primary youtube-save" type="submit">Enregistrer</button>
+      </form>
     </section>
   </main>
 </div>

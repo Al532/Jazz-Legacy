@@ -1,10 +1,11 @@
 import {supabasePublishableKey, supabaseUrl} from './supabase-config.mjs';
-import {libraryFromRecords, libraryRecords, queueChanges} from './sync.mjs';
+import {libraryFromRecords, libraryRecords, queueChanges, queueGuestAdditions} from './sync.mjs';
 
 const $ = id => document.getElementById(id);
 const guestMode = 'jazz-legacy.mode';
 const profileKey = id => 'jazz-legacy.profile.' + id;
 const importedKey = 'jazz-legacy.guest-imported';
+const transferredKey = 'jazz-legacy.guest-transferred';
 const status = message => { $('account-status').textContent = message; };
 
 function read(key, fallback) {
@@ -75,18 +76,16 @@ export function setupAccount(library, renderPlayer) {
         for (const row of data) remote[row.id] = row.value;
         if (data.length < pageSize) break;
       }
-      if (!localStorage.getItem(importedKey)) {
-        await library.load();
-        if (!active()) return;
-        const guest = libraryRecords(library.guestState(), read(guestMode));
-        for (const [id, value] of Object.entries(guest)) {
-          if (Object.hasOwn(remote, id) || Object.hasOwn(target.pending, id)) continue;
-          target.pending[id] = {value, id: crypto.randomUUID()};
-        }
-        for (const [id, change] of Object.entries(target.pending)) target.records[id] = change.value;
-        persist();
-        localStorage.setItem(importedKey, userId);
-      }
+      await library.load();
+      if (!active()) return;
+      const transferred = read(transferredKey);
+      const previousOwner = localStorage.getItem(importedKey);
+      const guest = libraryRecords(library.guestState(), read(guestMode));
+      // Older versions only recorded the account that first received the guest library.
+      const alreadyTransferred = transferred || (previousOwner && previousOwner !== userId ? guest : {});
+      queueGuestAdditions(guest, alreadyTransferred, remote, target.pending);
+      persist();
+      write(transferredKey, {...alreadyTransferred, ...guest});
       const pending = Object.entries(target.pending);
       for (let start = 0; start < pending.length; start += 200) {
         const batch = pending.slice(start, start + 200);
@@ -106,6 +105,8 @@ export function setupAccount(library, renderPlayer) {
       target.records = remote;
       persist();
       apply();
+      const repaired = libraryRecords(library.state(), accountMode);
+      if (Object.keys(repaired).some(id => !Object.hasOwn(remote, id) || remote[id] == null)) changed();
       status('Favoris, playlists et préférences synchronisés.');
     } catch {
       if (active()) status('Synchronisation indisponible. Tes changements sont conservés sur cet appareil.');
@@ -183,6 +184,7 @@ export function setupAccount(library, renderPlayer) {
       write('heads.playlists.v1', [...read('heads.playlists.v1', []), ...playlists]);
       if (backup.mode && !read(guestMode)) write(guestMode, backup.mode);
       localStorage.removeItem(importedKey);
+      localStorage.removeItem(transferredKey);
       location.reload();
     } catch { status('Ce fichier de sauvegarde est illisible.'); }
     finally { input.value = ''; }
@@ -254,5 +256,5 @@ export function setupAccount(library, renderPlayer) {
   addEventListener('online', () => schedule(0));
   document.addEventListener('visibilitychange', () => { if (!document.hidden) schedule(0); });
   setInterval(() => { if (!document.hidden) schedule(0); }, 45000);
-  return {ready: () => ready, changed, mode};
+  return {ready: () => ready, changed, mode, syncGuest: () => schedule(0)};
 }

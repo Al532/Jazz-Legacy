@@ -1,9 +1,11 @@
-import {videoIdFromText,clock,mergeItems,keyLabels} from './lib.mjs';
+import {clock,mergeItems,keyLabels} from './lib.mjs';
 import {groupByStandard, shuffle, shuffleStandards} from './listening.mjs';
 import {setupLibrary} from './library-ui.mjs';
 import {parseLoudness, volumeForTrack} from './loudness.mjs';
 import {setupAccount} from './account.mjs';
 import {offlineAudio} from './offline.mjs';
+import {setupYouTubeImport, youtubeThumbnail} from './youtube-import.mjs';
+import {embedYouTube} from './youtube-player.mjs';
 
 const $ = id => document.getElementById(id);
 const STORAGE = 'heads-standards-v1';
@@ -71,7 +73,22 @@ const library = setupLibrary({
   publicItems: () => sharedItems,
   canListen, listen, shareLink, notify, onChange: () => account.changed(),
 });
-const account = setupAccount(library, updatePlayerUi);
+const account = setupAccount(library, () => {
+  if (currentId && !current()) {
+    operation++;
+    currentId = null;
+    positionReady = false;
+    youtubePlayer?.close();
+    youtubePlayer = undefined;
+    playingYouTube = false;
+    unloadAudio?.();
+    audio.pause();
+    $('youtube-fallback').hidden = true;
+    notify('');
+    setPlaying(false);
+  }
+  updatePlayerUi();
+});
 const localAudio = offlineAudio();
 let objectUrl;
 let skippedUnavailable = 0;
@@ -79,6 +96,8 @@ let unloadAudio;
 let listeningMode = defaultMode;
 let playerAboveViewport = false;
 let displayedVersions = '';
+let youtubePlayer;
+let playingYouTube = false;
 
 function scopeCount() { return listeningMode.type === 'all' ? radioGroups.size : scope.length; }
 
@@ -87,7 +106,7 @@ function hasDirectAudio(track) {
 }
 
 function canListen(track) {
-  return navigator.onLine ? hasDirectAudio(track) : offlineIds.has(track.id);
+  return navigator.onLine ? hasDirectAudio(track) || Boolean(track.youtubeImportId) : offlineIds.has(track.id);
 }
 
 function shuffledQueue(previous = null) {
@@ -95,7 +114,7 @@ function shuffledQueue(previous = null) {
   return shuffleStandards(radioGroups, previous?.standardId || previous?.id, hasDirectAudio);
 }
 
-function listen(versions, label, mode, gesture = true, autoplay = true) {
+function listen(versions, label, mode, gesture = true, autoplay = true, firstId) {
   const tracks = !navigator.onLine || mode.type === 'offline'
     ? versions.filter(track => offlineIds.has(track.id)) : versions;
   if (!tracks.length) {
@@ -115,6 +134,7 @@ function listen(versions, label, mode, gesture = true, autoplay = true) {
   if (autoplay) {
     const fromRadioButton = document.activeElement === $('listen-all');
     pending = shuffledQueue();
+    if (firstId && pending.includes(firstId)) pending = [firstId, ...pending.filter(id => id !== firstId)];
     playItem(pending.shift());
     if (fromRadioButton) $('play').focus({preventScroll: true});
   } else {
@@ -139,8 +159,6 @@ function loadLocal() {
   } catch { /* Start with an empty local collection. */ }
   return [];
 }
-function store() {localStorage.setItem(STORAGE,JSON.stringify(items));render();scheduleSync();}
-function now() {return Date.now();}
 function current() {return library.lookup(currentId);}
 function availableVersions(item) {
   if (!item) return [];
@@ -199,6 +217,16 @@ function openListeningLink(type, id) {
 }
 
 function updateCover(item) {
+  if (item?.importVideoId) {
+    const thumbnail = youtubeThumbnail(item.importVideoId);
+    if (coverSelection !== thumbnail) {
+      coverSelection = thumbnail;
+      coverIds = [item.importVideoId];
+      cover.hidden = true;
+      cover.src = thumbnail;
+    }
+    return;
+  }
   const ids = [...new Set([item?.videoId, item?.previousYoutube, item?.duplicateYoutube])]
     .filter(id => /^[A-Za-z0-9_-]{11}$/.test(id || ''));
   const selection = ids.join(',');
@@ -211,7 +239,6 @@ function updateCover(item) {
   else cover.removeAttribute('src');
 }
 
-function itemUpdate(id,patch) {items=items.map(x=>x.id===id?{...x,...patch,updatedAt:now()}:x);store();updatePlayerUi();}
 function safeInt(value) {return Number.isFinite(value)&&value>=0?value:0;}
 
 function selectVersion(id) {
@@ -296,7 +323,7 @@ function updatePlayerUi(){
   $('personnel-details').hidden = !item?.musicians?.length;
   $('play').textContent = isPlaying ? '❚❚' : '▶';
   $('play').setAttribute('aria-label', isPlaying ? 'Mettre en pause' : 'Lire');
-  $('engine-indicator').textContent = playingStoredAudio ? 'MP3' : objectUrl ? 'Hors ligne' : '';
+  $('engine-indicator').textContent = playingYouTube ? 'YouTube' : playingStoredAudio ? 'MP3' : objectUrl ? 'Hors ligne' : '';
   library.setPlaylistTrack(item);
   const max = Math.max(1, duration || 120);
   $('seek').max = String(max);
@@ -314,26 +341,7 @@ function updatePlayerUi(){
   $('play').disabled = !item && !library.all().length;
   updateMiniPlayer(item);
 }
-async function addTrack(text, sharedTitle = '') {
-  const videoId = videoIdFromText(text);
-  if (!videoId) {notify('Lien YouTube invalide ou non reconnu.');return;}
-  const existing = library.byVideo(videoId);
-  if (existing) {listen([existing], existing.title, {type: 'recording', id: existing.id});return;}
-  const title = sharedTitle.trim() || ('Vidéo ' + videoId);
-  const id = crypto.randomUUID();
-  items.push({id,videoId,title:title.slice(0,240),
-    order:now(),updatedAt:now(),deleted:false});
-  store();
-  notify('Version ajoutée à la liste.');
-  if (sharedTitle) return;
-  try {
-    const response = await fetch('/api/meta/' + videoId);
-    const meta = await response.json();
-    if (meta.title) itemUpdate(id, {title:meta.title.slice(0,240)});
-  } catch { /* la version reste disponible */ }
-}
-
-function pause(){ audio.pause(); setPlaying(false); }
+function pause(){ if (youtubePlayer) youtubePlayer.pause(); else audio.pause(); setPlaying(false); }
 function setPlaying(playing) {
   isPlaying = playing;
   updatePlayerUi();
@@ -363,6 +371,9 @@ async function playItem(id, {skipStored = false, advanceOnError = true} = {}) {
   const item = library.lookup(id);
   if (!item) return;
   const seq = ++operation;
+  youtubePlayer?.close();
+  youtubePlayer = undefined;
+  playingYouTube = false;
   unloadAudio?.();
   audio.pause();
   audio.removeAttribute('src');
@@ -390,8 +401,9 @@ async function playItem(id, {skipStored = false, advanceOnError = true} = {}) {
     }
     if (!url && !navigator.onLine) throw new Error('Hors ligne');
     if (!url) url = storedUrl || item.audioUrl;
-    if (!url && item.videoId) {
-      const response = await fetch('/api/stream/' + item.videoId + (skipStored ? '?external=1' : ''), {
+    const videoId = item.importVideoId || item.videoId;
+    if (!url && videoId) {
+      const response = await fetch('/api/stream/' + videoId + (skipStored ? '?external=1' : ''), {
         signal: AbortSignal.timeout(4500),
       });
       if (!response.ok) throw new Error('Flux audio indisponible');
@@ -400,10 +412,11 @@ async function playItem(id, {skipStored = false, advanceOnError = true} = {}) {
       storedAudioStatus = stream.storedAudio || storedAudioStatus;
       if (stream.available !== false) {
         url = stream.url;
+        playingYouTube = stream.storedAudio !== 'available';
         if (stream.storedAudio === 'available') {
           playingStoredAudio = true;
-          if (!storedAudioIds.has(item.videoId)) {
-            storedAudioIds.add(item.videoId);
+          if (!storedAudioIds.has(videoId)) {
+            storedAudioIds.add(videoId);
             library.refresh();
           }
         }
@@ -431,6 +444,28 @@ async function playItem(id, {skipStored = false, advanceOnError = true} = {}) {
       return;
     }
     if (playingStoredAudio && navigator.onLine) return playItem(item.id, {skipStored: true, advanceOnError});
+    if (navigator.onLine && item.youtubeImportId) {
+      positionReady = false;
+      playingYouTube = true;
+      showYouTubeLink(item);
+      notify('Chargement du lecteur YouTube…');
+      youtubePlayer = embedYouTube($('youtube-player'), item.importVideoId, {
+        ready() { positionReady = true; updatePlayerUi(); },
+        playing() { skippedUnavailable = 0; setPlaying(true); notify(''); setupMedia(item); },
+        paused() { setPlaying(false); },
+        ended: autoAdvance,
+        prompt() { notify('Appuie sur Lecture pour lancer la vidéo YouTube.'); },
+        error() {
+          youtubePlayer?.close();
+          youtubePlayer = undefined;
+          positionReady = false;
+          setPlaying(false);
+          notify('Cette vidéo ne peut pas être lue ici. Ouvre-la sur YouTube ou passe à la suivante.');
+        },
+      });
+      updatePlayerUi();
+      return;
+    }
     if (advanceOnError && scopeCount() > 1 && skippedUnavailable < Math.min(3, scopeCount() - 1)) {
       skippedUnavailable++;
       next();
@@ -462,6 +497,7 @@ function loadAudio(url) {
 function showAudioFallback(item, storedAudioStatus) {
   positionReady = false;
   playingStoredAudio = false;
+  playingYouTube = false;
   setPlaying(false);
   const messages = {
     notUploaded: 'Aucun MP3 correspondant dans le stockage pour cette version.',
@@ -474,9 +510,10 @@ function showAudioFallback(item, storedAudioStatus) {
 }
 
 function showYouTubeLink(item) {
-  if (!item?.videoId) return;
+  const videoId = item?.importVideoId || item?.videoId;
+  if (!videoId) return;
   const link = $('youtube-fallback');
-  link.href = 'https://www.youtube.com/watch?v=' + encodeURIComponent(item.videoId);
+  link.href = 'https://www.youtube.com/watch?v=' + encodeURIComponent(videoId);
   link.hidden = false;
 }
 
@@ -484,6 +521,7 @@ function togglePlay() {
   if (!current()) { library.resume(defaultMode); return; }
   if (isPlaying) { pause(); return; }
   advanceGuard = false;
+  if (youtubePlayer) { youtubePlayer.play(true); return; }
   if (positionReady) {
     const seq = operation;
     audio.play().then(() => {
@@ -497,12 +535,14 @@ function togglePlay() {
 function seekTo(value) {
   const seconds = Number(value);
   if (!positionReady || !Number.isFinite(seconds)) return;
-  if (audio.readyState) audio.currentTime = seconds;
+  if (youtubePlayer) youtubePlayer.seek(seconds);
+  else if (audio.readyState) audio.currentTime = seconds;
   currentTime = seconds;
   updatePlayerUi();
 }
 function setupMedia(item){if(!('mediaSession' in navigator))return;
-  navigator.mediaSession.metadata=new MediaMetadata({title:item.title,artist:item.artist || 'Jazz Legacy',artwork:[{src:'/icon.png',type:'image/png'}]});
+  const artwork = coverSelection.startsWith('https://i.ytimg.com/') ? coverSelection : '/icon.png';
+  navigator.mediaSession.metadata=new MediaMetadata({title:item.title,artist:item.artist || 'Jazz Legacy',artwork:[{src:artwork}]});
   for(const [action,handler] of Object.entries({play:togglePlay,pause:pause,nexttrack:next,previoustrack:prev,seekto:e=>seekTo(e.seekTime)})){
     try{navigator.mediaSession.setActionHandler(action,handler);}catch{}
   }
@@ -512,7 +552,8 @@ audio.addEventListener('pause',()=>setPlaying(false));
 audio.addEventListener('play',()=>setPlaying(true));
 audio.addEventListener('error',()=>{if (positionReady) playItem(currentId, {skipStored: true});});
 setInterval(()=>{
-  if(positionReady && audio.readyState>0){currentTime=audio.currentTime;duration=Number.isFinite(audio.duration)?audio.duration:duration;}
+  if (positionReady && youtubePlayer) { currentTime = youtubePlayer.time(); duration = youtubePlayer.duration(); }
+  else if(positionReady && audio.readyState>0){currentTime=audio.currentTime;duration=Number.isFinite(audio.duration)?audio.duration:duration;}
   $('time-current').textContent = clock(currentTime);
   $('time-end').textContent = clock(duration);
   $('seek').max = String(Math.max(1, duration || 120));
@@ -529,7 +570,21 @@ async function syncNow(){
       const remote=await remoteRes.json();
       if(!remoteRes.ok)throw new Error(remote.error||`Erreur ${remoteRes.status}`);
       sharedItems = remote.items;
-      if (!remote.canEdit) { render(); return; }
+      if (!remote.canEdit) {
+        render();
+        if (items.some(item => !item.deleted)) {
+          await library.load();
+          const publicIds = new Set(sharedItems.map(item => item.id));
+          const migrated = library.migrateGuestImports(items.filter(item => !publicIds.has(item.id)));
+          if (migrated.size) {
+            items = items.filter(item => !migrated.has(item.id));
+            localStorage.setItem(STORAGE, JSON.stringify(items));
+            render();
+            account.syncGuest();
+          }
+        }
+        return;
+      }
       const merged=mergeItems(items,sharedItems);
       items=merged;localStorage.setItem(STORAGE,JSON.stringify(items));render();
       // Une égalité ne nécessite pas d'écriture serveur.
@@ -579,14 +634,21 @@ window.addEventListener('jazz-session-changed', () => {
   loadSharedLoudness();
 });
 window.addEventListener('offline', render);
-document.addEventListener('visibilitychange', () => {if (!document.hidden) syncNow();});
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && youtubePlayer) pause();
+  if (!document.hidden) syncNow();
+});
 // Android : NewPipe → Partager → Jazz Legacy. Android transmet souvent le lien dans « text ».
-const query=new URLSearchParams(location.search);const shared=query.get('url')||query.get('text')||'';
+const query=new URLSearchParams(location.search);
+const hasSharedLink = ['url', 'text', 'title'].some(key => query.has(key));
+const shared = ['url', 'text', 'title'].map(key => query.get(key)).filter(Boolean).join('\n');
 const sharedType = query.has('version') ? 'version' : query.has('standard') ? 'standard' : null;
 const audioIndexReady = Promise.race([loadStoredAudio(), new Promise(resolve => setTimeout(resolve, 500))]);
 render();
 const sharedCatalogueReady = syncNow();
-Promise.all([library.load(), refreshOffline(), account.ready(), audioIndexReady]).then(async () => {
+const ready = Promise.all([library.load(), refreshOffline(), account.ready(), audioIndexReady]);
+const openYouTubeImport = setupYouTubeImport(library, ready);
+ready.then(async () => {
   updatePlayerUi();
   if (sharedType) {
     const id = query.get(sharedType);
@@ -595,9 +657,9 @@ Promise.all([library.load(), refreshOffline(), account.ready(), audioIndexReady]
     if (current() || openListeningLink(sharedType, id)) return;
     notify(navigator.onLine ? 'Ce lien d’écoute ne correspond à aucun enregistrement disponible.'
       : 'Ce lien d’écoute est indisponible hors connexion.');
-  } else if (shared && videoIdFromText(shared)) {
+  } else if (hasSharedLink) {
     history.replaceState(null,'',location.pathname);
-    addTrack(shared,query.get('title') || '');
+    openYouTubeImport(shared);
   }
 });
 loadSharedLoudness();

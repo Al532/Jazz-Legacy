@@ -22,7 +22,7 @@ body { margin: 0; min-height: 100vh; background: radial-gradient(ellipse at 15% 
 .logomark { display: block; border-radius: .55rem; box-shadow: 0 0 0 1px var(--line); }
 .brand h1 { margin: 0; font: 400 clamp(1.6rem, 3.8vw, 2.15rem)/1 var(--serif); letter-spacing: -.045em; }
 .top-actions { flex-shrink: 0; }
-.library-nav { display: flex; gap: .3rem; }
+.library-nav { display: flex; flex-wrap: wrap; gap: .3rem; }
 .nav-button { min-height: 44px; padding: .35rem .7rem; border: 0; border-radius: .5rem; color: var(--muted); background: transparent; }
 .nav-button[aria-pressed="true"] { color: var(--accent); background: #382b27; }
 .main-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: clamp(1rem, 3vw, 2rem); margin-top: 1.4rem; align-items: start; }
@@ -42,7 +42,7 @@ body { margin: 0; min-height: 100vh; background: radial-gradient(ellipse at 15% 
 .radio-start span[aria-hidden] { margin-inline-end: .3em; }
 .collection-panel { padding: .3rem 0 0; border: 0; background: transparent; }
 .collection-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .55rem; }
-.collection-head h2, .playlists-panel h2, .dialog h2 { font: 400 1.9rem/1.18 var(--serif); margin: 0; }
+.collection-head h2, .playlists-panel h2, .import-panel h2, .dialog h2 { font: 400 1.9rem/1.18 var(--serif); margin: 0; }
 .collection-count { color: var(--muted); font: .875rem/1 system-ui, sans-serif; margin-left: .2em; }
 .eyebrow { color: var(--accent); text-transform: uppercase; letter-spacing: .1em; font-size: .75rem; font-weight: 680; display: flex; gap: .6rem; align-items: center; margin-bottom: .8rem; }
 .engine-indicator { margin-left: auto; color: var(--muted); letter-spacing: .04em; text-transform: none; font-weight: 500; }
@@ -86,7 +86,7 @@ a { color: var(--accent); text-underline-offset: .18em; }
 .player-note:empty, #account-status:empty { display: none; }
 #youtube-fallback { display: inline-block; margin-top: .55rem; font-size: .875rem; }
 .catalogue-controls { margin: 1rem 0 .55rem; }
-input[type=search], select, .dialog input { width: 100%; padding: .55rem .65rem; border: 1px solid var(--line); border-radius: .5rem; background: var(--inset); color: inherit; }
+input[type=search], select, .dialog input, .import-panel input { width: 100%; padding: .55rem .65rem; border: 1px solid var(--line); border-radius: .5rem; background: var(--inset); color: inherit; }
 .standard-row { border-bottom: 1px solid var(--line); }
 .standard-row summary { padding: 0 .35rem; cursor: pointer; font-weight: 550; overflow-wrap: anywhere; }
 .standard-heading { display: inline-flex; align-items: center; gap: .2rem; min-height: 44px; max-width: 100%; vertical-align: middle; }
@@ -114,12 +114,23 @@ input[type=search], select, .dialog input { width: 100%; padding: .55rem .65rem;
 .dialog-top { display: flex; justify-content: space-between; align-items: center; gap: .5rem; }
 .dialog label { display: block; margin-top: 1rem; }
 .dialog input { margin: .3rem 0 .65rem; }
+.import-panel label { display: block; margin: .9rem 0 .3rem; }
+.import-link-row { display: flex; flex-wrap: wrap; gap: .5rem; }
+.import-link-row input { flex: 1 1 12rem; min-width: 0; }
+.youtube-preview { display: flex; align-items: center; gap: .75rem; overflow-wrap: anywhere; }
+.youtube-preview img { object-fit: cover; border-radius: .35rem; }
+.youtube-save { margin-top: 1rem; }
+#youtube-import-status:empty { display: none; }
+.youtube-player { margin-top: 1rem; }
+.youtube-player iframe { display: block; width: 100%; min-height: 200px; aspect-ratio: 16 / 9; border: 0; }
+#playlist-versions { margin-top: .65rem; padding-left: 0; }
 .close { font-size: 1.55rem; }
 .mini-player { display: none; }
 @media (max-width: 767px) {
   .topbar { flex-wrap: wrap; }
   .library-nav { order: 1; flex-basis: 100%; }
   .main-grid { grid-template-columns: minmax(0, 1fr); }
+  .import-panel { grid-row: 1; }
   .app:has(+ .mini-player:not([hidden])) { padding-bottom: calc(5.5rem + env(safe-area-inset-bottom)); }
   .mini-player { position: fixed; z-index: 1; inset: auto 0 0; display: flex; align-items: center; gap: .5rem; padding: .5rem .9rem calc(.5rem + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--surface); }
   .mini-track { display: grid; flex: 1; min-width: 0; }
@@ -130,5 +141,6 @@ input[type=search], select, .dialog input { width: 100%; padding: .55rem .65rem;
 }
 @media (max-width: 370px) {
   .top-actions .btn-outline { padding-inline: .42rem; }
+  .nav-button { padding-inline: .5rem; }
   .transport { gap: .3rem; }
 }

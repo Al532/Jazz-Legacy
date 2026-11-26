@@ -1,20 +1,22 @@
-export function videoIdFromText(raw) {
+export function videoIdFromText(raw, {youtubeLink = false} = {}) {
   const text = String(raw || '').trim();
   const matches = text.match(/https?:\/\/[^\s<>"'()]+/g) || [];
   for (const candidate of matches.length ? matches : [text]) {
     try {
       const u = new URL(candidate.replace(/[.,;]+$/, ''));
+      if (!['http:', 'https:'].includes(u.protocol) || u.username || u.password || u.port) continue;
       const hostname = u.hostname.toLowerCase().replace(/^www\./,'');
       let id = '';
       if (hostname === 'youtu.be') id = u.pathname.split('/')[1] || '';
-      else if (['youtube.com','m.youtube.com','music.youtube.com','youtube-nocookie.com','piped.video'].includes(hostname)) {
-        id = u.searchParams.get('v') || '';
+      else if (['youtube.com','m.youtube.com','music.youtube.com','youtube-nocookie.com'].includes(hostname) ||
+          (!youtubeLink && hostname === 'piped.video')) {
+        if (!youtubeLink || u.pathname === '/watch') id = u.searchParams.get('v') || '';
         if (!id && /^\/(?:shorts|live|embed|v)\//.test(u.pathname)) id = u.pathname.split('/')[2] || '';
       }
       if (/^[\w-]{11}$/.test(id)) return id;
     } catch { /* continue */ }
   }
-  return /^[\w-]{11}$/.test(text) ? text : null;
+  return !youtubeLink && /^[\w-]{11}$/.test(text) ? text : null;
 }
 export function parseClock(raw) {
   const s = String(raw ?? '').trim().replace(',','.');

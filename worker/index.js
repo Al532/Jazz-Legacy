@@ -122,7 +122,20 @@ export default {
       }
       const meta=path.match(/^\/api\/meta\/([\w-]{11})$/);
       if(meta && request.method==='GET'){
-        try{const d=await fetchJson(`https://www.youtube.com/oembed?url=${encodeURIComponent('https://www.youtube.com/watch?v='+meta[1])}&format=json`,7000);return json({title:d.title||'',uploader:d.author_name||''});}catch{return json({title:'',uploader:''});}
+        const api = new URL('https://www.youtube.com/oembed');
+        api.searchParams.set('url', 'https://www.youtube.com/watch?v=' + meta[1]);
+        api.searchParams.set('format', 'json');
+        try {
+          const response = await fetch(api, {signal: AbortSignal.timeout(7000), headers: {Accept: 'application/json'}});
+          if ([401, 403, 404, 410].includes(response.status)) return json({error: 'Vidéo inaccessible'}, 404);
+          if (response.ok) {
+            const data = await response.json();
+            if (typeof data.title === 'string' && data.title.trim()) {
+              return json({title: data.title, uploader: typeof data.author_name === 'string' ? data.author_name : ''});
+            }
+          }
+        } catch { /* YouTube is temporarily unavailable. */ }
+        return json({error: 'Vérification indisponible'}, 502);
       }
       const stream=path.match(/^\/api\/stream\/([\w-]{11})$/);
       if(stream && request.method==='GET'){

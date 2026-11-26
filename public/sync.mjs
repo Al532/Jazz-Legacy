@@ -1,8 +1,9 @@
 const key = (...parts) => JSON.stringify(parts);
 const modeTypes = new Set(['all', 'favorites', 'playlist', 'recording', 'offline']);
 
-export function libraryRecords({favorites = [], playlists = []}, mode) {
+export function libraryRecords({favorites = [], playlists = [], imports = []}, mode) {
   const records = {};
+  for (const item of imports) records[key('youtube', item.id)] = item;
   for (const id of favorites) records[key('favorite', id)] = true;
   for (const playlist of playlists) {
     records[key('playlist', playlist.id)] = playlist.name;
@@ -16,6 +17,7 @@ export function libraryFromRecords(records) {
   const favorites = [];
   const playlists = new Map();
   const members = [];
+  const imports = [];
   let mode;
   for (const [id, value] of Object.entries(records)) {
     if (value == null) continue;
@@ -28,10 +30,19 @@ export function libraryFromRecords(records) {
     if (type === 'favorite' && value === true) favorites.push(item);
     if (type === 'playlist' && typeof value === 'string') playlists.set(item, {id: item, name: value, entries: []});
     if (type === 'member' && value === true && typeof entry === 'string') members.push([item, entry]);
+    if (type === 'youtube' && value.id === item && /^youtube:[\w-]{11}$/.test(item) &&
+        item === `youtube:${value.videoId}` && typeof value.title === 'string') imports.push(value);
     if (type === 'preference' && item === 'listening' && modeTypes.has(value?.type)) mode = value;
   }
   for (const [id, entry] of members) playlists.get(id)?.entries.push(entry);
-  return {favorites, playlists: [...playlists.values()], mode};
+  return {favorites, playlists: [...playlists.values()], imports, mode};
+}
+
+export function queueGuestAdditions(guest, transferred, remote, pending) {
+  for (const [id, value] of Object.entries(guest)) {
+    if (Object.hasOwn(transferred, id) || Object.hasOwn(remote, id) || Object.hasOwn(pending, id)) continue;
+    pending[id] = {value, id: crypto.randomUUID()};
+  }
 }
 
 export function queueChanges(current, next, pending) {
