@@ -80,7 +80,7 @@ export function keepImportsInPlaylists(playlists, imports) {
   }
 }
 
-const normalTitle = title => String(title || '').normalize('NFD').replace(/\p{M}/gu, '')
+export const normalTitle = title => String(title || '').normalize('NFD').replace(/\p{M}/gu, '')
   .toLowerCase().replace(/[’']/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
 
 export function suggestStandard(title, standards) {

@@ -1,8 +1,70 @@
 import {videoIdFromText} from './lib.mjs';
-import {suggestStandard, youtubePlaylistId} from './listening.mjs';
+import {normalTitle, suggestStandard, youtubePlaylistId} from './listening.mjs';
 
 const $ = id => document.getElementById(id);
 export const youtubeThumbnail = id => `https://i.ytimg.com/vi/${id}/hqdefault.jpg`;
+const watchUrl = id => `https://www.youtube.com/watch?v=${id}`;
+
+const jazzArtistAliases = {
+  'Bill Evans': ['Bill Evans Trio', 'The Bill Evans Trio'],
+  'Charlie Parker': ['Charlie “Bird” Parker'],
+  'Dizzy Gillespie': [],
+  'Duke Ellington': [],
+  'Ella Fitzgerald': [],
+  'Freddie Hubbard': [],
+  'Herbie Hancock': [],
+  'John Coltrane': ['John Coltrane Quartet', 'The John Coltrane Quartet'],
+  'Miles Davis': ['Miles Davis Quintet', 'The Miles Davis Quintet'],
+  'Oscar Peterson': ['Oscar Peterson Trio', 'The Oscar Peterson Trio'],
+  'Sonny Rollins': [],
+  'Thelonious Monk': [],
+};
+
+export function sharedYouTubeInput(params) {
+  const fields = ['url', 'text', 'title'].flatMap(key => params.getAll(key)).map(value => value.trim()).filter(Boolean);
+  for (const field of fields) {
+    const id = videoIdFromText(field, {youtubeLink: true});
+    if (id) return watchUrl(id);
+  }
+  return fields[0] || '';
+}
+
+export function suggestYouTubeMetadata(title, uploader, standards) {
+  const cleanedTitle = title.replace(/\s*[\[(](official (music )?video|official audio|lyrics|audio|video|hd)[\])]\s*/gi, ' ').trim();
+  const channel = (uploader || '').trim();
+  const topicChannel = /\s+[-–—]\s+Topic$/i.test(channel);
+  const channelArtist = channel.replace(/\s+[-–—]\s+Topic$/i, '');
+  const artists = new Map();
+  for (const standard of standards) {
+    for (const {artist} of standard.versions || []) {
+      if (artist?.trim()) artists.set(normalTitle(artist), artist.trim());
+    }
+  }
+  for (const [artist, aliases] of Object.entries(jazzArtistAliases)) {
+    for (const name of [artist, ...aliases]) artists.set(normalTitle(name), name);
+  }
+  const knownArtist = value => {
+    const key = normalTitle(value);
+    return key ? artists.get(key) || (key === normalTitle(channelArtist) ? channelArtist : '') : '';
+  };
+
+  const parts = cleanedTitle.split(/(\s*[:|–—]\s*|\s+-\s+|\s+(?:by|par)\s+)/i);
+  let name = cleanedTitle;
+  let artist = '';
+  if (parts.length > 1) {
+    const first = knownArtist(parts[0]);
+    const last = knownArtist(parts.at(-1));
+    if (first && !last) {
+      artist = first;
+      name = parts.slice(2).join('');
+    } else if (last && !first) {
+      artist = last;
+      name = parts.slice(0, -2).join('');
+    }
+  }
+  artist ||= artists.get(normalTitle(channelArtist)) || (topicChannel ? channelArtist : '');
+  return {name: name.trim() || cleanedTitle, artist};
+}
 
 export function setupYouTubeImport(library, ready) {
   const link = $('youtube-link');
@@ -57,16 +119,14 @@ export function setupYouTubeImport(library, ready) {
       const existing = library.byVideo(videoId);
       const reusable = existing && (library.publicRecording(existing.id) || existing.youtubeImportId) ? existing : undefined;
       const {standards} = library.importOptions();
-      const suggested = existing ? standards.find(group => group.id === existing.standardId) : suggestStandard(title, standards);
+      const metadata = suggestYouTubeMetadata(title, uploader, standards);
+      const suggested = existing ? standards.find(group => group.id === existing.standardId) : suggestStandard(metadata.name, standards);
       standard.replaceChildren(new Option('Nouveau standard', ''), ...[...standards]
         .sort((a, b) => a.title.localeCompare(b.title, 'fr')).map(group => new Option(group.title, group.id)));
       $('youtube-standard-fields').hidden = Boolean(reusable);
       standard.value = suggested?.id || '';
-      const cleanedTitle = title.replace(/\s*[\[(](official (music )?video|official audio|lyrics|audio|video|hd)[\])]\s*/gi, ' ').trim();
-      const parts = cleanedTitle.split(/\s+[-–—]\s+/);
-      const channel = (uploader || '').replace(/\s+-\s+Topic$/i, '').toLowerCase();
-      name.value = (parts.length > 1 && parts[0].toLowerCase() === channel ? parts.slice(1).join(' – ') : cleanedTitle).slice(0, 240);
-      $('youtube-artist').value = (existing?.artist || uploader || '').slice(0, 240);
+      name.value = metadata.name.slice(0, 240);
+      $('youtube-artist').value = (existing?.artist || metadata.artist).slice(0, 240);
       standard.onchange();
       fillPlaylists();
       $('youtube-preview-title').textContent = title;
@@ -84,6 +144,13 @@ export function setupYouTubeImport(library, ready) {
 
   $('youtube-link-form').onsubmit = event => { event.preventDefault(); check(); };
   link.oninput = reset;
+  link.onpaste = event => {
+    const videoId = videoIdFromText(event.clipboardData?.getData('text/plain'), {youtubeLink: true});
+    if (!videoId) return;
+    event.preventDefault();
+    link.value = watchUrl(videoId);
+    reset();
+  };
   form.onsubmit = event => {
     event.preventDefault();
     if (!checked) return;
@@ -109,9 +176,9 @@ export function setupYouTubeImport(library, ready) {
     } catch { status.textContent = 'Impossible d’enregistrer la version sur cet appareil. Réessaie.'; }
   };
 
-  return shared => {
+  return params => {
     library.showImport();
-    link.value = shared.slice(0, 4096);
+    link.value = sharedYouTubeInput(params).slice(0, 4096);
     check();
   };
 }

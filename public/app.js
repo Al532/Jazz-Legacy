@@ -647,16 +647,19 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) youtubePlayer?.background();
   else syncNow();
 });
-// Android : NewPipe → Partager → Jazz Legacy. Android transmet souvent le lien dans « text ».
+// Android peut transmettre le lien dans le champ « text ».
 const query=new URLSearchParams(location.search);
 const hasSharedLink = ['url', 'text', 'title'].some(key => query.has(key));
-const shared = ['url', 'text', 'title'].map(key => query.get(key)).filter(Boolean).join('\n');
 const sharedType = query.has('version') ? 'version' : query.has('standard') ? 'standard' : null;
 const audioIndexReady = Promise.race([loadStoredAudio(), new Promise(resolve => setTimeout(resolve, 500))]);
 render();
 const sharedCatalogueReady = syncNow();
 const ready = Promise.all([library.load(), refreshOffline(), account.ready(), audioIndexReady]);
 const openYouTubeImport = setupYouTubeImport(library, ready);
+if (!sharedType && hasSharedLink) {
+  history.replaceState(null,'',location.pathname);
+  openYouTubeImport(query);
+}
 ready.then(async () => {
   updatePlayerUi();
   if (sharedType) {
@@ -666,9 +669,6 @@ ready.then(async () => {
     if (current() || openListeningLink(sharedType, id)) return;
     notify(navigator.onLine ? 'Ce lien d’écoute ne correspond à aucun enregistrement disponible.'
       : 'Ce lien d’écoute est indisponible hors connexion.');
-  } else if (hasSharedLink) {
-    history.replaceState(null,'',location.pathname);
-    openYouTubeImport(shared);
   }
 });
 loadSharedLoudness();
