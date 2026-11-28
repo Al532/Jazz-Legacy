@@ -6,18 +6,20 @@ import {setupAccount} from './account.mjs';
 import {offlineAudio} from './offline.mjs';
 import {setupYouTubeImport, youtubeThumbnail} from './youtube-import.mjs';
 import {embedYouTube} from './youtube-player.mjs';
+import {audioCache, coverCache} from './media-cache.mjs';
 
 const $ = id => document.getElementById(id);
 const STORAGE = 'heads-standards-v1';
 const audio = $('audio');
 const cover = $('player-cover');
-let coverIds = [];
-cover.addEventListener('load', () => { cover.hidden = false; });
-cover.addEventListener('error', () => {
-  cover.hidden = true;
-  const next = coverIds.shift();
-  if (next) cover.src = '/api/cover/' + next;
+const preparedAudio = audioCache();
+const loadCover = coverCache();
+cover.addEventListener('load', () => {
+  if (!cover.hasAttribute('src')) return;
+  cover.hidden = false;
+  updateMedia(current());
 });
+cover.addEventListener('error', () => { cover.hidden = true; });
 let coverSelection = '';
 let items = loadLocal();
 let sharedItems = [];
@@ -34,6 +36,9 @@ let advanceGuard = false;
 let scope = [];
 let radioGroups = new Map();
 let storedAudioIds = new Set();
+let audioRelease;
+let audioIndexLoaded = false;
+let audioIndexRequest = 0;
 let offlineIds = new Set();
 let playingStoredAudio = false;
 let pending = [];
@@ -82,10 +87,12 @@ const account = setupAccount(library, () => {
     youtubePlayer = undefined;
     playingYouTube = false;
     unloadAudio?.();
-    audio.pause();
+    resetAudio();
+    preparedAudio.prepare([]);
     $('youtube-fallback').hidden = true;
     notify('');
     setPlaying(false);
+    updateMedia(null);
   }
   updatePlayerUi();
 });
@@ -93,6 +100,7 @@ const localAudio = offlineAudio();
 let objectUrl;
 let skippedUnavailable = 0;
 let unloadAudio;
+let recoverAudio;
 let listeningMode = defaultMode;
 let playerAboveViewport = false;
 let displayedVersions = '';
@@ -102,11 +110,21 @@ let playingYouTube = false;
 function scopeCount() { return listeningMode.type === 'all' ? radioGroups.size : scope.length; }
 
 function hasDirectAudio(track) {
-  return offlineIds.has(track.id) || storedAudioIds.has(track.videoId) || Boolean(track.audioUrl);
+  return offlineIds.has(track.id) || Boolean(directAudioUrl(track));
+}
+
+function storedAudioUrl(track) {
+  return storedAudioIds.has(track.videoId) ? '/api/audio/' + track.videoId : null;
+}
+
+function directAudioUrl(track) { return storedAudioUrl(track) || track.audioUrl; }
+
+function canListenOffline(track) {
+  return offlineIds.has(track.id) || Boolean(preparedAudio.get(directAudioUrl(track)));
 }
 
 function canListen(track) {
-  return navigator.onLine ? hasDirectAudio(track) || Boolean(track.youtubeImportId) : offlineIds.has(track.id);
+  return navigator.onLine ? hasDirectAudio(track) || Boolean(track.youtubeImportId) : canListenOffline(track);
 }
 
 function shuffledQueue(previous = null) {
@@ -114,9 +132,45 @@ function shuffledQueue(previous = null) {
   return shuffleStandards(radioGroups, previous?.standardId || previous?.id, hasDirectAudio);
 }
 
+function fillQueue() {
+  if (!pending.length && scopeCount() > 1) pending = shuffledQueue(current());
+}
+
+function prepareUpcoming() {
+  const item = current();
+  if (!item || !navigator.onLine || !isPlaying || !positionReady) {
+    preparedAudio.prepare([]);
+    return;
+  }
+  fillQueue();
+  const tracks = new Map(library.all().map(track => [track.id, track]));
+  const upcoming = [];
+  const urls = new Set();
+  const currentUrl = directAudioUrl(item);
+  const addAudio = track => {
+    const url = directAudioUrl(track);
+    if (url && url !== currentUrl && !offlineIds.has(track.id)) urls.add(url);
+  };
+  for (const id of pending) {
+    const track = tracks.get(id);
+    if (!track || id === currentId) continue;
+    if (upcoming.length < 3 && canListen(track)) upcoming.push(track);
+    if (urls.size < 2) addAudio(track);
+    if (upcoming.length === 3 && urls.size === 2) break;
+  }
+  const versions = availableVersions(item).filter(track => track.id !== currentId);
+  const audioCount = urls.size + 2;
+  for (const track of versions) {
+    addAudio(track);
+    if (urls.size === audioCount) break;
+  }
+  preparedAudio.prepare([...urls]);
+  for (const track of [...upcoming, ...versions.slice(0, 5)]) loadCover(coverSources(track));
+}
+
 function listen(versions, label, mode, gesture = true, autoplay = true, firstId) {
-  const tracks = !navigator.onLine || mode.type === 'offline'
-    ? versions.filter(track => offlineIds.has(track.id)) : versions;
+  const tracks = mode.type === 'offline' ? versions.filter(track => offlineIds.has(track.id))
+    : navigator.onLine ? versions : versions.filter(canListenOffline);
   if (!tracks.length) {
     if (gesture) notify('Aucun enregistrement disponible dans ce mode.');
     return false;
@@ -168,18 +222,24 @@ function availableVersions(item) {
 async function loadStoredAudio() {
   try {
     if (!navigator.onLine) return;
+    const request = ++audioIndexRequest;
     const response = await fetch('/api/audio', {cache: 'no-store', signal: AbortSignal.timeout(4000)});
     const {ids} = await response.json();
-    if (response.ok && Array.isArray(ids)) {
+    if (request === audioIndexRequest && response.ok && Array.isArray(ids)) {
+      const release = response.headers.get('X-Catalogue-Release');
+      const changedRelease = audioIndexLoaded && release !== audioRelease;
+      audioRelease = release;
+      audioIndexLoaded = true;
+      if (changedRelease) preparedAudio.clear();
       const nextIds = new Set(ids);
-      if (nextIds.size !== storedAudioIds.size || ids.some(id => !storedAudioIds.has(id))) {
+      if (changedRelease || nextIds.size !== storedAudioIds.size || ids.some(id => !storedAudioIds.has(id))) {
         storedAudioIds = nextIds;
         render();
       }
     }
   } catch { /* Existing playback sources stay available. */ }
 }
-function render() {library.refresh();updatePlayerUi();}
+function render() {library.refresh();updatePlayerUi();prepareUpcoming();}
 function notify(message) {$('player-status').textContent=message;}
 
 let shareFeedbackTimer;
@@ -216,27 +276,25 @@ function openListeningLink(type, id) {
   return listen(versions, '', mode, false, false);
 }
 
-function updateCover(item) {
+function coverSources(item) {
   if (item?.importVideoId) {
-    const thumbnail = youtubeThumbnail(item.importVideoId);
-    if (coverSelection !== thumbnail) {
-      coverSelection = thumbnail;
-      coverIds = [item.importVideoId];
-      cover.hidden = true;
-      cover.src = thumbnail;
-    }
-    return;
+    return [youtubeThumbnail(item.importVideoId), '/api/cover/' + item.importVideoId];
   }
-  const ids = [...new Set([item?.videoId, item?.previousYoutube, item?.duplicateYoutube])]
-    .filter(id => /^[A-Za-z0-9_-]{11}$/.test(id || ''));
-  const selection = ids.join(',');
+  return [...new Set([item?.videoId, item?.previousYoutube, item?.duplicateYoutube])]
+    .filter(id => /^[A-Za-z0-9_-]{11}$/.test(id || ''))
+    .map(id => '/api/cover/' + id);
+}
+
+function updateCover(item) {
+  const sources = coverSources(item);
+  const selection = sources.join(',');
   if (selection === coverSelection) return;
   coverSelection = selection;
   cover.hidden = true;
-  const [first, ...fallbacks] = ids;
-  coverIds = fallbacks;
-  if (first) cover.src = '/api/cover/' + first;
-  else cover.removeAttribute('src');
+  cover.removeAttribute('src');
+  loadCover(sources, 'auto').then(src => {
+    if (src && selection === coverSelection) cover.src = src;
+  });
 }
 
 function safeInt(value) {return Number.isFinite(value)&&value>=0?value:0;}
@@ -341,17 +399,38 @@ function updatePlayerUi(){
   $('play').disabled = !item && !library.all().length;
   updateMiniPlayer(item);
 }
-function pause(){ if (youtubePlayer) youtubePlayer.pause(); else audio.pause(); setPlaying(false); }
+function pause() {
+  setPlaying(false);
+  if (youtubePlayer) youtubePlayer.pause();
+  else audio.pause();
+}
 function setPlaying(playing) {
   isPlaying = playing;
+  if (navigator.mediaSession) navigator.mediaSession.playbackState = currentId ? (playing ? 'playing' : 'paused') : 'none';
   updatePlayerUi();
 }
 function next({automatic = false} = {}) {
-  if (scopeCount() < 2) return;
-  if (!pending.length) pending = shuffledQueue(current());
-  const id = pending.shift();
-  if (currentId && currentId !== id) historyIds.push(currentId);
+  if (scopeCount() < 2) return false;
+  fillQueue();
+  const background = automatic && document.hidden && audioIndexLoaded;
+  const eligible = id => {
+    const track = library.lookup(id);
+    if (!track || track.id === currentId) return false;
+    if (!navigator.onLine) return canListenOffline(track);
+    return !background || !track.youtubeImportId || hasDirectAudio(track);
+  };
+  let index = pending.findIndex(eligible);
+  if (index < 0 && automatic) {
+    const cycle = shuffledQueue(current());
+    index = cycle.findIndex(eligible);
+    if (index >= 0) pending = cycle;
+  }
+  if (index < 0) return false;
+  const id = pending[index];
+  pending.splice(0, index + 1);
+  if (currentId) historyIds.push(currentId);
   playItem(id, {automatic});
+  return true;
 }
 function prev() {
   const id = historyIds.pop();
@@ -362,20 +441,35 @@ function prev() {
 function autoAdvance(){
   if (advanceGuard || !positionReady) return;
   advanceGuard = true;
-  if (scopeCount() === 1) {
+  if (!next({automatic: true})) {
     pause();
-    seekTo(0);
-  } else next({automatic: true});
+    if (scopeCount() <= 1) seekTo(0);
+    else if (!navigator.onLine) notify('Aucun autre enregistrement prêt hors connexion.');
+  }
 }
 
 function skipUnavailable(limit) {
   if (scopeCount() < 2 || skippedUnavailable >= Math.min(limit, scopeCount() - 1)) return false;
   skippedUnavailable++;
-  next({automatic: true});
-  return true;
+  return next({automatic: true});
 }
 
-async function playItem(id, {skipStored = false, advanceOnError = true, automatic = false} = {}) {
+function revokeAudioUrl() {
+  if (objectUrl) URL.revokeObjectURL(objectUrl);
+  objectUrl = undefined;
+}
+
+function resetAudio() {
+  recoverAudio = undefined;
+  audio.pause();
+  if (audio.hasAttribute('src')) {
+    audio.removeAttribute('src');
+    audio.load();
+  }
+  revokeAudioUrl();
+}
+
+async function playItem(id, {skipStored = false, skipOffline = false, advanceOnError = true, automatic = false} = {}) {
   const item = library.lookup(id);
   if (!item) return;
   const seq = ++operation;
@@ -383,34 +477,90 @@ async function playItem(id, {skipStored = false, advanceOnError = true, automati
   youtubePlayer = undefined;
   playingYouTube = false;
   unloadAudio?.();
-  audio.pause();
-  audio.removeAttribute('src');
-  if (objectUrl) URL.revokeObjectURL(objectUrl);
-  objectUrl = undefined;
+  recoverAudio = undefined;
   currentId = item.id;
   currentTime = 0;
   duration = 0;
-  isPlaying = false;
   positionReady = false;
   advanceGuard = false;
-  const storedUrl = !skipStored && storedAudioIds.has(item.videoId) ? '/api/audio/' + item.videoId : null;
+  const storedUrl = !skipStored && storedAudioUrl(item);
+  const directUrl = storedUrl || item.audioUrl;
+  const cachedFile = preparedAudio.get(directUrl);
+  let savedFile;
   playingStoredAudio = Boolean(storedUrl);
   $('youtube-fallback').hidden = true;
   notify('Chargement de l’audio…');
-  updatePlayerUi();
+  setPlaying(true);
+  updateMedia(item);
+  if (!cachedFile) preparedAudio.prepare([]);
 
   let storedAudioStatus = skipStored ? 'readFailed' : undefined;
-  try {
-    let url;
-    if (offlineIds.has(item.id)) {
-      const file = await localAudio.get(item.id);
-      if (seq !== operation) return;
-      if (file) url = objectUrl = URL.createObjectURL(file);
+  function failed(error) {
+    if (seq !== operation) return;
+    recoverAudio = undefined;
+    if (error.name === 'NotAllowedError') {
+      positionReady = audio.readyState >= 1;
+      duration = Number.isFinite(audio.duration) ? audio.duration : 0;
+      recoverAudio = failed;
+      setPlaying(false);
+      notify('Appuie sur Lecture pour lancer l’audio.');
+      return;
     }
-    if (!url && !navigator.onLine) throw new Error('Hors ligne');
-    if (!url) url = storedUrl || item.audioUrl;
-    const videoId = item.importVideoId || item.videoId;
-    if (!url && videoId) {
+    resetAudio();
+    if (cachedFile && !savedFile) {
+      preparedAudio.remove(directUrl);
+      if (navigator.onLine && isPlaying) return playItem(item.id, {skipStored, skipOffline, advanceOnError, automatic});
+    }
+    if (navigator.onLine && isPlaying) {
+      if (savedFile) return playItem(item.id, {skipStored, skipOffline: true, advanceOnError, automatic});
+      if (playingStoredAudio) return playItem(item.id, {skipStored: true, skipOffline, advanceOnError, automatic});
+    }
+    if (navigator.onLine && item.youtubeImportId) {
+      if (isPlaying && automatic && document.hidden && skipUnavailable(Infinity)) return;
+      positionReady = false;
+      playingYouTube = true;
+      showYouTubeLink(item);
+      notify('Chargement du lecteur YouTube…');
+      youtubePlayer = embedYouTube($('youtube-player'), item.importVideoId, {
+        ready() { positionReady = true; updatePlayerUi(); },
+        playing() { skippedUnavailable = 0; setPlaying(true); notify(''); prepareUpcoming(); },
+        paused() { setPlaying(false); },
+        ended: autoAdvance,
+        prompt({manual}) {
+          if (isPlaying && automatic && !manual && skipUnavailable(Infinity)) return;
+          setPlaying(false);
+          notify('Appuie sur Lecture pour lancer la vidéo YouTube.');
+        },
+        error() {
+          if (isPlaying && automatic && skipUnavailable(Infinity)) return;
+          youtubePlayer?.close();
+          youtubePlayer = undefined;
+          positionReady = false;
+          setPlaying(false);
+          notify('Cette vidéo ne peut pas être lue ici. Ouvre-la sur YouTube ou passe à la suivante.');
+        },
+      });
+      if (!isPlaying) youtubePlayer.pause();
+      updatePlayerUi();
+      return;
+    }
+    if (isPlaying && advanceOnError && skipUnavailable(3)) return;
+    showAudioFallback(item, storedAudioStatus);
+  }
+
+  try {
+    if (!skipOffline && offlineIds.has(item.id)) {
+      resetAudio();
+      savedFile = await localAudio.get(item.id).catch(() => undefined);
+      if (seq !== operation) return;
+    }
+    const file = savedFile || cachedFile;
+    if (!file && !navigator.onLine) throw new Error('Hors ligne');
+    let url = directUrl;
+    if (!file && !url) {
+      resetAudio();
+      const videoId = item.importVideoId || item.videoId;
+      if (!videoId) throw new Error('Audio indisponible');
       const response = await fetch('/api/stream/' + videoId + (skipStored ? '?external=1' : ''), {
         signal: AbortSignal.timeout(4500),
       });
@@ -430,76 +580,56 @@ async function playItem(id, {skipStored = false, advanceOnError = true, automati
         }
       }
     }
+    revokeAudioUrl();
+    if (file) url = objectUrl = URL.createObjectURL(file);
     if (!url) throw new Error('Audio indisponible');
-    if (seq !== operation) return;
-    playingStoredAudio = !objectUrl && playingStoredAudio;
+    playingStoredAudio = !savedFile && playingStoredAudio;
+    applyTrackVolume(item);
     await loadAudio(url);
     if (seq !== operation) return;
     duration = Number.isFinite(audio.duration) ? audio.duration : 0;
     positionReady = true;
-    applyTrackVolume(item);
-    await audio.play();
-    if (seq !== operation) return;
+    recoverAudio = failed;
     skippedUnavailable = 0;
-    setPlaying(true);
+    updatePlayerUi();
     notify('');
-    setupMedia(item);
-  } catch (error) {
-    if (seq !== operation) return;
-    if (error.name === 'NotAllowedError' && positionReady) {
-      notify('Appuie sur Lecture pour lancer l’audio.');
-      updatePlayerUi();
-      return;
-    }
-    if (playingStoredAudio && navigator.onLine) return playItem(item.id, {skipStored: true, advanceOnError, automatic});
-    if (navigator.onLine && item.youtubeImportId) {
-      if (automatic && document.hidden && skipUnavailable(Infinity)) return;
-      positionReady = false;
-      playingYouTube = true;
-      showYouTubeLink(item);
-      notify('Chargement du lecteur YouTube…');
-      youtubePlayer = embedYouTube($('youtube-player'), item.importVideoId, {
-        ready() { positionReady = true; updatePlayerUi(); },
-        playing() { skippedUnavailable = 0; setPlaying(true); notify(''); setupMedia(item); },
-        paused() { setPlaying(false); },
-        ended: autoAdvance,
-        prompt({manual}) {
-          if (automatic && !manual && skipUnavailable(Infinity)) return;
-          notify('Appuie sur Lecture pour lancer la vidéo YouTube.');
-        },
-        error() {
-          if (automatic && skipUnavailable(Infinity)) return;
-          youtubePlayer?.close();
-          youtubePlayer = undefined;
-          positionReady = false;
-          setPlaying(false);
-          notify('Cette vidéo ne peut pas être lue ici. Ouvre-la sur YouTube ou passe à la suivante.');
-        },
-      });
-      updatePlayerUi();
-      return;
-    }
-    if (advanceOnError && skipUnavailable(3)) return;
-    showAudioFallback(item, storedAudioStatus);
-  }
+    prepareUpcoming();
+  } catch (error) { failed(error); }
 }
 
 function loadAudio(url) {
   return new Promise((resolve, reject) => {
+    let playError;
+    let metadataReady = false;
     const cleanup = () => {
       unloadAudio = undefined;
       audio.removeEventListener('loadedmetadata', ready);
       audio.removeEventListener('error', failed);
       clearTimeout(timer);
     };
-    const ready = () => { cleanup(); resolve(); };
-    const failed = () => { cleanup(); reject(new Error('Audio indisponible')); };
+    const finish = error => {
+      if (unloadAudio !== failed) return;
+      cleanup();
+      if (error) reject(error);
+      else resolve();
+    };
+    const ready = () => {
+      metadataReady = true;
+      if (!isPlaying || playError) finish(playError);
+    };
+    const failed = () => finish(new Error('Audio indisponible'));
     const timer = setTimeout(failed, 13000);
     unloadAudio = failed;
     audio.addEventListener('loadedmetadata', ready);
     audio.addEventListener('error', failed);
     audio.src = url;
-    audio.load();
+    // Request playback in the same turn as the source change, including at the end of a track.
+    if (isPlaying) audio.play().then(() => finish(), error => {
+      if (error.name === 'AbortError' && !isPlaying) {
+        if (metadataReady) finish();
+      } else if (error.name === 'NotAllowedError' && !metadataReady) playError = error;
+      else finish(error);
+    });
   });
 }
 
@@ -526,20 +656,27 @@ function showYouTubeLink(item) {
   link.hidden = false;
 }
 
-function togglePlay() {
+function resumePlayback() {
   if (!current()) { library.resume(defaultMode); return; }
-  if (isPlaying) { pause(); return; }
+  if (isPlaying) return;
   advanceGuard = false;
-  if (youtubePlayer) { youtubePlayer.play(true); return; }
+  if (youtubePlayer) { setPlaying(true); youtubePlayer.play(true); return; }
   if (positionReady) {
     const seq = operation;
+    setPlaying(true);
     audio.play().then(() => {
-      if (seq === operation) { setPlaying(true); notify(''); }
-    }).catch(() => {
-      if (seq === operation) playItem(currentId);
+      if (seq === operation && isPlaying) { notify(''); prepareUpcoming(); }
+    }).catch(error => {
+      if (seq !== operation || !isPlaying) return;
+      if (error.name === 'NotAllowedError') {
+        setPlaying(false);
+        notify('Appuie sur Lecture pour lancer l’audio.');
+      } else playItem(currentId);
     });
   } else playItem(currentId);
 }
+
+function togglePlay() { if (isPlaying) pause(); else resumePlayback(); }
 
 function seekTo(value) {
   const seconds = Number(value);
@@ -549,17 +686,32 @@ function seekTo(value) {
   currentTime = seconds;
   updatePlayerUi();
 }
-function setupMedia(item){if(!('mediaSession' in navigator))return;
-  const artwork = coverSelection.startsWith('https://i.ytimg.com/') ? coverSelection : '/icon.png';
-  navigator.mediaSession.metadata=new MediaMetadata({title:item.title,artist:item.artist || 'Jazz Legacy',artwork:[{src:artwork}]});
-  for(const [action,handler] of Object.entries({play:togglePlay,pause:pause,nexttrack:next,previoustrack:prev,seekto:e=>seekTo(e.seekTime)})){
-    try{navigator.mediaSession.setActionHandler(action,handler);}catch{}
+function updateMedia(item) {
+  if (!navigator.mediaSession) return;
+  const artwork = cover.hidden ? '/icon.png' : cover.src;
+  navigator.mediaSession.metadata = item ? new MediaMetadata({
+    title: item.title, artist: item.artist || 'Jazz Legacy', artwork: [{src: artwork}],
+  }) : null;
+}
+
+if (navigator.mediaSession) {
+  const actions = {play: resumePlayback, pause, nexttrack: skipToNext, previoustrack: prev,
+    seekto: event => seekTo(event.seekTime)};
+  for (const [action, handler] of Object.entries(actions)) {
+    try { navigator.mediaSession.setActionHandler(action, handler); } catch {}
   }
 }
-audio.addEventListener('ended',autoAdvance);
-audio.addEventListener('pause',()=>setPlaying(false));
-audio.addEventListener('play',()=>setPlaying(true));
-audio.addEventListener('error',()=>{if (positionReady) playItem(currentId, {skipStored: true});});
+audio.addEventListener('ended', () => { if (audio.ended && isPlaying) autoAdvance(); });
+audio.addEventListener('pause', () => {
+  if (positionReady && audio.paused && !audio.ended && !youtubePlayer) setPlaying(false);
+});
+audio.addEventListener('play', () => {
+  if (positionReady && !audio.paused && !youtubePlayer && !isPlaying) {
+    setPlaying(true);
+    prepareUpcoming();
+  }
+});
+audio.addEventListener('error', () => { if (audio.error) recoverAudio?.(audio.error); });
 setInterval(()=>{
   if (positionReady && youtubePlayer) { currentTime = youtubePlayer.time(); duration = youtubePlayer.duration(); }
   else if(positionReady && audio.readyState>0){currentTime=audio.currentTime;duration=Number.isFinite(audio.duration)?audio.duration:duration;}
@@ -645,7 +797,7 @@ window.addEventListener('jazz-session-changed', () => {
 window.addEventListener('offline', render);
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) youtubePlayer?.background();
-  else syncNow();
+  else { syncNow(); loadStoredAudio(); }
 });
 // Android peut transmettre le lien dans le champ « text ».
 const query=new URLSearchParams(location.search);
