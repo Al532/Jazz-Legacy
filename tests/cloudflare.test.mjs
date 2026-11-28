@@ -6,6 +6,8 @@ import {parseLoudness, volumeForTrack} from '../public/loudness.mjs';
 
 const id = 'TestVideo01';
 const key = 'jazz-legacy/media/' + 'c'.repeat(64) + '.mp3';
+const coverId = 'OtherTest01';
+const coverKey = 'jazz-legacy/media/' + 'd'.repeat(64) + '.png';
 const first = 'a'.repeat(64);
 const second = 'b'.repeat(64);
 
@@ -16,9 +18,9 @@ test('online refresh reads the active release and anyone can stream its publishe
     get: async (name, options) => {
       if (name.endsWith('current.json')) return {json: async () => ({release: active})};
       if (name === `jazz-legacy/releases/${active}.json`) return {json: async () => ({
-        catalogue: {standards: [{id: active}]}, audio: {[id]: key}, covers: {[id]: key},
+        catalogue: {standards: [{id: active}]}, audio: {[id]: key}, covers: {[id]: key, [coverId]: coverKey},
       })};
-      if (name !== key) return null;
+      if (name !== key && name !== coverKey) return null;
       const {offset = 0, length = bytes.length} = options?.range ?? {};
       return {body: bytes.slice(offset, offset + length), size: bytes.length};
     },
@@ -36,7 +38,12 @@ test('online refresh reads the active release and anyone can stream its publishe
   active = second;
   assert.deepEqual(await (await get('/catalogue-data.json')).json(), {standards: [{id: second}]});
   assert.equal((await get('/api/cover/' + id)).status, 404);
-  assert.deepEqual(await (await get('/api/audio')).json(), {enabled: true, ids: [id]});
+  const cover = await get('/api/cover/' + coverId);
+  assert.equal(cover.headers.get('Cache-Control'), 'public, max-age=3600');
+  assert.equal(cover.headers.get('Content-Type'), 'image/png');
+  const audioIndex = await get('/api/audio');
+  assert.equal(audioIndex.headers.get('X-Catalogue-Release'), second);
+  assert.deepEqual(await audioIndex.json(), {enabled: true, ids: [id]});
   const stream = await (await get('/api/stream/' + id)).json();
   assert.equal(stream.url, '/api/audio/' + id);
   assert.equal((await (await get('/api/stream/' + id + '?external=1')).json()).available, false);

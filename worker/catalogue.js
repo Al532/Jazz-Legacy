@@ -64,7 +64,9 @@ async function cloudMedia(request, env, path) {
   if (isCatalogue) return new Response(request.method === 'HEAD' ? null : JSON.stringify(data.catalogue), {
     headers: {'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Catalogue-Release': data.release},
   });
-  if (path === '/api/audio') return json({enabled: true, ids: Object.keys(data.audio)});
+  if (path === '/api/audio') return Response.json({enabled: true, ids: Object.keys(data.audio)}, {
+    headers: {'Cache-Control': 'no-store', 'X-Catalogue-Release': data.release},
+  });
   if (path === '/api/audio/status') return json({enabled: true, connected: true});
   if (isPlaybackLoudness) {
     const tracks = Object.entries(data.loudness?.recordings ?? {}).flatMap(([id, recording]) => {
@@ -99,7 +101,10 @@ async function cloudMedia(request, env, path) {
   }
   const object = request.method === 'HEAD' ? head : await env.MEDIA.get(key, bounds ? {range: bounds} : undefined);
   if (!object) return json({}, 404);
-  const headers = new Headers({'Cache-Control': 'no-store', 'Accept-Ranges': 'bytes', 'X-Content-Type-Options': 'nosniff'});
+  const headers = new Headers({
+    'Cache-Control': isCover ? 'public, max-age=3600' : 'no-store',
+    'Accept-Ranges': 'bytes', 'X-Content-Type-Options': 'nosniff',
+  });
   headers.set('Content-Type', isCover ? artworkTypes[extension] : 'audio/mpeg');
   headers.set('Content-Length', String(bounds?.length ?? object.size));
   if (bounds) headers.set('Content-Range', `bytes ${bounds.offset}-${bounds.offset + bounds.length - 1}/${head.size}`);
