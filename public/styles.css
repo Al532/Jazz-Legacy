@@ -21,7 +21,7 @@ body { margin: 0; min-height: 100vh; background: radial-gradient(ellipse at 15% 
 .brand { display: flex; align-items: center; gap: .65rem; }
 .logomark { display: block; border-radius: .55rem; box-shadow: 0 0 0 1px var(--line); }
 .brand h1 { margin: 0; font: 400 clamp(1.6rem, 3.8vw, 2.15rem)/1 var(--serif); letter-spacing: -.045em; }
-.top-actions { flex-shrink: 0; }
+.top-actions { display: flex; flex-wrap: wrap; gap: .45rem; }
 .library-nav { display: flex; flex-wrap: wrap; gap: .3rem; }
 .nav-button { min-height: 44px; padding: .35rem .7rem; border: 0; border-radius: .5rem; color: var(--muted); background: transparent; }
 .nav-button[aria-pressed="true"] { color: var(--accent); background: #382b27; }
@@ -124,6 +124,11 @@ input[type=search], select, .dialog input, .import-panel input { width: 100%; pa
 .youtube-player { margin-top: 1rem; }
 .youtube-player iframe { display: block; width: 100%; min-height: 200px; aspect-ratio: 16 / 9; border: 0; }
 #playlist-versions { margin-top: .65rem; padding-left: 0; }
+.playlist-remove { flex: none; min-height: 44px; }
+.midi-row { display: flex; flex-wrap: wrap; align-items: center; gap: .45rem; margin: .65rem 0; }
+.midi-row > div { flex: 1 0 8rem; }
+.midi-row span { display: block; color: var(--muted); font-size: .88rem; }
+#midi-status { color: var(--muted); margin-bottom: 0; }
 .close { font-size: 1.55rem; }
 .mini-player { display: none; }
 @media (max-width: 767px) {

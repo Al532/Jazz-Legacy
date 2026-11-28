@@ -104,13 +104,26 @@ export function playable(group) {
   return group.recordings.filter(version => version.audioUrl || version.videoId);
 }
 
+export function playlistVersionRefs({id, legacyId, youtubeImportId}) {
+  return [...new Set([youtubeImportId, id, legacyId].filter(Boolean).map(value => `version:${value}`))];
+}
+
+export function removePlaylistRecording(playlist, version) {
+  const refs = playlistVersionRefs(version);
+  playlist.entries = playlist.entries.filter(entry => !refs.includes(entry));
+  if (playlist.entries.includes(`standard:${version.standardId}`) &&
+      !refs.some(ref => playlist.entries.includes(`exclude:${ref}`))) {
+    playlist.entries.push(`exclude:version:${version.id}`);
+  }
+}
+
 export function playlistRecordings(groups, entries) {
   const ids = new Set(entries);
-  return groups.flatMap(group => playable(group).filter(
-    version => ids.has(`standard:${group.id}`) || ids.has(`version:${version.id}`) ||
-      (version.legacyId && ids.has(`version:${version.legacyId}`)) ||
-      (version.youtubeImportId && ids.has(`version:${version.youtubeImportId}`)),
-  ));
+  return groups.flatMap(group => playable(group).filter(version => {
+    const refs = playlistVersionRefs(version);
+    return refs.some(ref => ids.has(ref)) ||
+      (ids.has(`standard:${group.id}`) && !refs.some(ref => ids.has(`exclude:${ref}`)));
+  }));
 }
 
 export function shuffle(ids, previous = null, random = Math.random) {

@@ -16,7 +16,10 @@
       <button class="nav-button" type="button" data-library="playlists" aria-controls="playlists" aria-pressed="false">Playlists</button>
       <button class="nav-button" type="button" data-library="import" aria-controls="import-panel" aria-pressed="false">Importer</button>
     </nav>
-    <div class="top-actions"><button class="btn-outline" id="account-button" type="button">Mon compte</button></div>
+    <div class="top-actions">
+      <button class="btn-outline" id="settings-button" type="button">Réglages</button>
+      <button class="btn-outline" id="account-button" type="button">Se connecter</button>
+    </div>
   </header>
   <main class="main-grid">
     <section class="panel now-panel" aria-label="Lecteur">
@@ -127,7 +130,7 @@
 </aside>
 <dialog id="account-dialog" class="dialog" aria-labelledby="account-heading">
   <div class="dialog-top">
-    <h2 id="account-heading">Mon compte</h2>
+    <h2 id="account-heading">Se connecter</h2>
     <form method="dialog"><button class="close" aria-label="Fermer">×</button></form>
   </div>
   <div id="account-guest">
@@ -147,8 +150,27 @@
     </div>
   </div>
   <p id="account-status" role="status" aria-live="polite"></p>
-  <label for="account-import">Importer une sauvegarde de Jazz Legacy</label>
-  <input id="account-import" type="file" accept="application/json,.json">
+</dialog>
+<dialog id="settings-dialog" class="dialog" aria-labelledby="settings-heading">
+  <div class="dialog-top">
+    <h2 id="settings-heading">Réglages</h2>
+    <form method="dialog"><button class="close" aria-label="Fermer">×</button></form>
+  </div>
+  <section aria-labelledby="midi-heading">
+    <h3 id="midi-heading">Commandes MIDI</h3>
+    <div class="midi-row">
+      <div><strong>Reculer de 2 s</strong><span id="midi-back-binding">Non assigné</span></div>
+      <button id="midi-back-learn" class="btn-outline" type="button" aria-label="MIDI Learn pour reculer de 2 s" aria-pressed="false" disabled>MIDI Learn</button>
+      <button id="midi-back-clear" class="btn-outline" type="button" aria-label="Effacer la commande MIDI pour reculer de 2 s" hidden>Effacer</button>
+    </div>
+    <div class="midi-row">
+      <div><strong>Avancer de 2 s</strong><span id="midi-forward-binding">Non assigné</span></div>
+      <button id="midi-forward-learn" class="btn-outline" type="button" aria-label="MIDI Learn pour avancer de 2 s" aria-pressed="false" disabled>MIDI Learn</button>
+      <button id="midi-forward-clear" class="btn-outline" type="button" aria-label="Effacer la commande MIDI pour avancer de 2 s" hidden>Effacer</button>
+    </div>
+    <button id="midi-enable" class="btn-outline" type="button" hidden>Activer le MIDI</button>
+    <p id="midi-status" role="status"></p>
+  </section>
 </dialog>
 <dialog id="share-dialog" class="dialog" aria-labelledby="share-heading">
   <div class="dialog-top">

@@ -46,8 +46,9 @@ export function setupAccount(library, renderPlayer) {
     profile = next ? read(profileKey(next.user.id), {records: {}, pending: {}}) : null;
     $('account-connected').hidden = !next;
     $('account-guest').hidden = Boolean(next);
+    $('account-heading').textContent = next ? 'Mon compte' : 'Se connecter';
     $('account-identity').textContent = next?.user.email ?? '';
-    $('account-button').textContent = next ? 'Compte connecté' : 'Mon compte';
+    $('account-button').textContent = next ? 'Compte' : 'Se connecter';
     apply();
     return profile ? sync() : undefined;
   }
@@ -143,52 +144,6 @@ export function setupAccount(library, renderPlayer) {
 
   const redirectTo = location.origin + '/';
   $('account-button').onclick = () => $('account-dialog').showModal();
-  $('account-import').onchange = async event => {
-    const input = event.currentTarget;
-    const file = input.files[0];
-    if (!file) return;
-    try {
-      if (file.size > 12000000) throw new Error();
-      const backup = JSON.parse(await file.text());
-      if (backup.format !== 'jazz-legacy-sites-backup-v1' || !backup.library) throw new Error();
-      if (backup.lyrics) {
-        if (!session) { status('Connecte-toi pour importer tes paroles personnelles.'); return; }
-        let conflicts = 0;
-        for (const [id, text] of Object.entries(backup.lyrics)) {
-          if (!/^[A-Za-z0-9_:-]{1,160}$/.test(id) || typeof text !== 'string' || text.length > 30000) throw new Error();
-          const url = '/api/lyrics/' + encodeURIComponent(id);
-          const response = await fetch(url, {cache: 'no-store'});
-          if (!response.ok) throw new Error();
-          const existing = await response.json();
-          if (existing.signIn) throw new Error();
-          if (existing.text) { if (existing.text !== text) conflicts++; continue; }
-          const written = await fetch(url, {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text})});
-          if (!written.ok) throw new Error();
-        }
-        status(conflicts ? `Paroles importées. ${conflicts} textes existants ont été conservés.` : 'Paroles personnelles importées.');
-        return;
-      }
-      if (session) {
-        status('Déconnecte-toi avant d’importer une bibliothèque stockée sur l’ancien site.');
-        return;
-      }
-      const old = read('heads.catalogue.personal.v1', {});
-      const seen = new Set(read('heads.playlists.v1', []).map(playlist => playlist.id));
-      const incoming = backup.library;
-      const merge = (first, second) => [...new Set([...(first || []), ...(second || [])].filter(value => typeof value === 'string'))];
-      const playlists = (backup.playlists || []).filter(playlist => typeof playlist?.id === 'string' &&
-        typeof playlist.name === 'string' && Array.isArray(playlist.entries) &&
-        playlist.entries.every(entry => typeof entry === 'string') && !seen.has(playlist.id));
-      write('heads.catalogue.personal.v1', {...old, favorites: merge(old.favorites, incoming.favorites),
-        trackFavorites: merge(old.trackFavorites, incoming.trackFavorites)});
-      write('heads.playlists.v1', [...read('heads.playlists.v1', []), ...playlists]);
-      if (backup.mode && !read(guestMode)) write(guestMode, backup.mode);
-      localStorage.removeItem(importedKey);
-      localStorage.removeItem(transferredKey);
-      location.reload();
-    } catch { status('Ce fichier de sauvegarde est illisible.'); }
-    finally { input.value = ''; }
-  };
   $('account-google').onclick = event => perform(event.currentTarget, async () => {
     const response = await fetch(supabaseUrl + '/auth/v1/settings', {
       headers: {apikey: supabasePublishableKey},

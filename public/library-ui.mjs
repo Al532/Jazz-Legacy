@@ -1,4 +1,5 @@
-import {addPlaylistVersion, buildLibrary, keepImportsInPlaylists, playable, playlistRecordings} from './listening.mjs';
+import {addPlaylistVersion, buildLibrary, keepImportsInPlaylists, playable, playlistRecordings,
+  playlistVersionRefs, removePlaylistRecording} from './listening.mjs';
 
 const catalogueStorage = 'heads.catalogue.personal.v1';
 const playlistsStorage = 'heads.playlists.v1';
@@ -118,22 +119,54 @@ export function setupLibrary({items, publicItems, canListen, listen, shareLink, 
     const recordings = document.createDocumentFragment();
     if (playlist) for (const version of playlistRecordings(groups, playlist.entries)) {
       const row = element('li');
-      const button = action([version.title, version.artist].filter(Boolean).join(' – '),
+      const label = [version.title, version.artist].filter(Boolean).join(' – ');
+      const button = action(label,
         () => resume({type: 'playlist', id: playlist.id}, true, version.id), !canListen(version));
       button.className = 'standard-choice';
-      row.append(button);
+      const remove = action('Retirer', () => {
+        const nextRow = row.nextElementSibling || row.previousElementSibling;
+        removeRecording(playlist, version);
+        const target = [...get('playlist-versions').children].find(entry => entry.dataset.versionId === nextRow?.dataset.versionId);
+        (target?.querySelector('.playlist-remove') || select).focus();
+      });
+      remove.classList.add('playlist-remove');
+      remove.setAttribute('aria-label', `Retirer ${label} de la playlist`);
+      row.dataset.versionId = version.id;
+      row.append(button, remove);
       recordings.append(row);
     }
     get('playlist-versions').replaceChildren(recordings);
     showMembership();
   }
 
+  function removeRecording(playlist, version) {
+    removePlaylistRecording(playlist, version);
+    if (version.youtubeImportId && !playlists.some(entry => entry.entries.includes(`version:${version.youtubeImportId}`))) {
+      const group = groups.find(entry => entry.id === version.standardId);
+      const remaining = group && playlists.find(entry => entry !== playlist &&
+        playlistRecordings([group], entry.entries).some(track => track.id === version.id));
+      if (remaining) addPlaylistVersion(playlists, remaining.id, version.youtubeImportId);
+      else {
+        imports = imports.filter(item => item.id !== version.youtubeImportId);
+        trackFavorites.delete(version.youtubeImportId);
+        if (!publicRecordings.has(version.id)) {
+          trackFavorites.delete(version.id);
+          trackFavorites.delete(version.legacyId);
+        }
+        refresh();
+      }
+    }
+    save();
+    renderPlaylists();
+    notify(`Piste retirée de « ${playlist.name} ».`);
+  }
+
   function showMembership() {
     const playlist = selected();
     get('playlist-membership').hidden = !playlist || !playlistTrack;
     if (!playlist || !playlistTrack) return;
-    const {id, legacyId, standardId, youtubeImportId} = playlistTrack;
-    const versionRefs = [...new Set([youtubeImportId, id, legacyId].filter(Boolean).map(value => `version:${value}`))];
+    const {standardId} = playlistTrack;
+    const versionRefs = playlistVersionRefs(playlistTrack);
     for (const [buttonId, refs, label] of [
       ['playlist-track', versionRefs, 'la version en cours'],
       ['playlist-standard', [`standard:${standardId}`], 'le standard en cours'],
@@ -143,15 +176,12 @@ export function setupLibrary({items, publicItems, canListen, listen, shareLink, 
       button.textContent = (added ? 'Retirer ' : 'Ajouter ') + label;
       button.setAttribute('aria-pressed', String(added));
       button.onclick = () => {
-        const before = [...playlist.entries];
-        if (added) playlist.entries = playlist.entries.filter(entry => !refs.includes(entry));
-        else playlist.entries.push(refs[0]);
-        if (added && imports.some(item => refs.includes(`version:${item.id}`) &&
-            !playlists.some(entry => entry.entries.includes(`version:${item.id}`)))) {
-          playlist.entries = before;
-          notify('Ajoute d’abord cette version à une autre playlist.');
+        if (added && buttonId === 'playlist-track') {
+          removeRecording(playlist, playlistTrack);
           return;
         }
+        if (added) playlist.entries = playlist.entries.filter(entry => !refs.includes(entry));
+        else playlist.entries.push(refs[0]);
         save();
         renderPlaylists();
       };
@@ -304,6 +334,10 @@ export function setupLibrary({items, publicItems, canListen, listen, shareLink, 
   const lookup = id => id ? all().find(version => version.id === id || version.legacyId === id || version.youtubeImportId === id) || null : null;
   return {
     all, lookup, refresh, markPlayingStandard,
+    playlistTracks(id) {
+      const playlist = playlists.find(playlist => playlist.id === id);
+      return playlist ? playlistRecordings(groups, playlist.entries) : [];
+    },
     showImport: () => showView('import'),
     importOptions: () => ({standards: groups, playlists: playlists.map(({id, name}) => ({id, name}))}),
     migrateGuestImports(candidates) {
@@ -359,7 +393,8 @@ export function setupLibrary({items, publicItems, canListen, listen, shareLink, 
       get('playlist-listen').setAttribute('aria-pressed', String(playlistId === activePlaylist));
     },
     setPlaylistTrack(item) {
-      if (playlistTrack?.id === item?.id && playlistTrack?.standardId === item?.standardId) return;
+      if (playlistTrack?.id === item?.id && playlistTrack?.standardId === item?.standardId &&
+          playlistTrack?.youtubeImportId === item?.youtubeImportId && playlistTrack?.legacyId === item?.legacyId) return;
       playlistTrack = item;
       showMembership();
     },

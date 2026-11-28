@@ -20,6 +20,4 @@ L’envoi réutilise les fichiers R2 dont l’empreinte correspond. Il vérifie 
 
 ## Changement d’adresse
 
-Les bibliothèques déjà synchronisées restent dans le projet Supabase existant. Pour récupérer les favoris et playlists du mode invité, exécuter `scripts/export-sites-library.js` dans la console du navigateur sur l’ancien site, à partir du profil concerné. Importer le JSON dans Mon compte sur la nouvelle adresse, avant de se connecter.
-
-Pour les paroles personnelles, exécuter `scripts/export-sites-lyrics.js` sur l’ancien site, connecté au compte qui les contient, puis importer le fichier depuis le nouveau site une fois connecté. Les textes déjà présents sont conservés. Conserver Sites et son dépôt source jusqu’à la vérification de la nouvelle adresse.
+Les bibliothèques déjà synchronisées et les paroles personnelles restent dans le projet Supabase existant.

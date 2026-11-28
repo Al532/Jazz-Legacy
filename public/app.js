@@ -6,6 +6,7 @@ import {setupAccount} from './account.mjs';
 import {offlineAudio} from './offline.mjs';
 import {setupYouTubeImport, youtubeThumbnail} from './youtube-import.mjs';
 import {embedYouTube} from './youtube-player.mjs';
+import {setupMidi} from './midi.mjs';
 
 const $ = id => document.getElementById(id);
 const STORAGE = 'heads-standards-v1';
@@ -71,9 +72,20 @@ const defaultMode = {type: 'all'};
 const library = setupLibrary({
   items: () => mergeItems(items, sharedItems),
   publicItems: () => sharedItems,
-  canListen, listen, shareLink, notify, onChange: () => account.changed(),
+  canListen, listen, shareLink, notify, onChange: () => {
+    account.changed();
+    updateLibraryPlayback();
+  },
 });
-const account = setupAccount(library, () => {
+const account = setupAccount(library, updateLibraryPlayback);
+
+function updateLibraryPlayback() {
+  if (listeningMode.type === 'playlist') {
+    const members = new Set(library.playlistTracks(listeningMode.id).map(track => track.id));
+    scope = scope.filter(id => members.has(id));
+    pending = pending.filter(id => members.has(id));
+    historyIds = historyIds.filter(id => members.has(id));
+  }
   if (currentId && !current()) {
     operation++;
     currentId = null;
@@ -88,7 +100,7 @@ const account = setupAccount(library, () => {
     setPlaying(false);
   }
   updatePlayerUi();
-});
+}
 const localAudio = offlineAudio();
 let objectUrl;
 let skippedUnavailable = 0;
@@ -100,6 +112,10 @@ let youtubePlayer;
 let playingYouTube = false;
 
 function scopeCount() { return listeningMode.type === 'all' ? radioGroups.size : scope.length; }
+
+function canGoNext() {
+  return scopeCount() > 1 || (listeningMode.type === 'playlist' && scope.length === 1 && scope[0] !== currentId);
+}
 
 function hasDirectAudio(track) {
   return offlineIds.has(track.id) || storedAudioIds.has(track.videoId) || Boolean(track.audioUrl);
@@ -335,7 +351,7 @@ function updatePlayerUi(){
   $('time-current').textContent = clock(currentTime);
   $('time-end').textContent = clock(duration || 0);
   $('prev').disabled = !historyIds.length;
-  $('next').disabled = !item || scopeCount() < 2;
+  $('next').disabled = !item || !canGoNext();
   $('next-label').textContent = radio ? 'Standard suivant' : 'Enregistrement suivant';
   $('prev').setAttribute('aria-label', radio ? 'Standard précédent' : 'Enregistrement précédent');
   $('play').disabled = !item && !library.all().length;
@@ -347,7 +363,7 @@ function setPlaying(playing) {
   updatePlayerUi();
 }
 function next({automatic = false} = {}) {
-  if (scopeCount() < 2) return;
+  if (!canGoNext()) return;
   if (!pending.length) pending = shuffledQueue(current());
   const id = pending.shift();
   if (currentId && currentId !== id) historyIds.push(currentId);
@@ -362,7 +378,7 @@ function prev() {
 function autoAdvance(){
   if (advanceGuard || !positionReady) return;
   advanceGuard = true;
-  if (scopeCount() === 1) {
+  if (!canGoNext()) {
     pause();
     seekTo(0);
   } else next({automatic: true});
@@ -621,10 +637,12 @@ new IntersectionObserver(([entry]) => {
 $('seek').addEventListener('input',e=>seekTo(e.target.value));
 function jumpBy(delta) {
   if (!positionReady) return;
-  seekTo(Math.max(0, Math.min(duration || Infinity, currentTime + delta)));
+  const time = youtubePlayer ? currentTime : audio.currentTime;
+  seekTo(Math.max(0, Math.min(duration || Infinity, time + delta)));
 }
 $('back-five').addEventListener('click', () => jumpBy(-5));
 $('forward-five').addEventListener('click', () => jumpBy(5));
+setupMidi(jumpBy);
 $('share-version').addEventListener('click', () => {
   const version = library.publicRecording(currentId);
   if (version) shareLink('version', version.id, [version.title, version.artist].filter(Boolean).join(' – '));

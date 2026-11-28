@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {buildLibrary, groupByStandard, keepImportsInPlaylists, playable, playlistRecordings, shuffle, shuffleStandards, suggestStandard} from '../public/listening.mjs';
+import {addPlaylistVersion, buildLibrary, groupByStandard, keepImportsInPlaylists, playable, playlistRecordings,
+  removePlaylistRecording, shuffle, shuffleStandards, suggestStandard} from '../public/listening.mjs';
 import {videoIdFromText} from '../public/lib.mjs';
 
 test('le catalogue, les ajouts existants alimentent le lecteur intégral', async () => {
@@ -57,6 +58,19 @@ test('les versions sont triées par année dans chaque standard sans changer leu
   assert.deepEqual(groups[0].recordings.map(version => version.id), [
     'personal', 'first:2', 'first:0', 'first:3', 'first:1',
   ]);
+});
+
+test('retirer une piste masque seulement cette version même si le standard entier est ajouté', () => {
+  const groups = buildLibrary([{id: 'blue', versions: [{youtube: 'abcdefghijk', duplicateYoutube: 'abcdefghijx'},
+    {youtube: 'abcdefghijl'}]}], []);
+  const [first, second] = playable(groups[0]);
+  const playlist = {id: 'test', entries: ['standard:blue', `version:${first.legacyId}`]};
+  removePlaylistRecording(playlist, first);
+  removePlaylistRecording(playlist, first);
+  assert.deepEqual(playlist.entries, ['standard:blue', `exclude:version:${first.id}`]);
+  assert.deepEqual(playlistRecordings(groups, playlist.entries), [second]);
+  addPlaylistVersion([playlist], playlist.id, first.id);
+  assert.deepEqual(playlistRecordings(groups, playlist.entries), [first, second]);
 });
 
 test('chaque cycle aléatoire contient chaque version une fois et évite la dernière en tête', () => {
